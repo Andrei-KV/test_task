@@ -1,0 +1,17 @@
+[project]
+name = "test-task"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Andrei-KV",email = "a.v.kovalev9@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy (>=2.0.44,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
