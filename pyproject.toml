@@ -6,9 +6,12 @@ authors = [
     {name = "Andrei-KV",email = "a.v.kovalev9@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<4.0.0"
 dependencies = [
-    "sqlalchemy (>=2.0.44,<3.0.0)"
+    "sqlalchemy (>=2.0.44,<3.0.0)",
+    "langchain-text-splitters (>=1.0.0,<2.0.0)",
+    "pytelegrambotapi (>=4.29.1,<5.0.0)",
+    "python-dotenv (>=1.2.1,<2.0.0)"
 ]
 
 
