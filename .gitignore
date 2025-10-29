@@ -2,4 +2,6 @@
 __pycache__/
 *.log
 draft.txt
-.json
+*.json
+*.env
+test_file.py
