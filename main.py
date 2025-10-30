@@ -9,6 +9,7 @@ def run_bot():
     print("🚀 Starting the Telegram bot...")
     bot.polling(none_stop=True)
 
+
 def run_listener():
     """Runs the Google Drive listener."""
     print("🚀 Starting the Google Drive listener...")
@@ -20,6 +21,7 @@ def run_listener():
 
 if __name__ == "__main__":
     p1 = multiprocessing.Process(target=run_bot)
+    
     p2 = multiprocessing.Process(target=run_listener)
 
     p1.start()

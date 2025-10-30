@@ -107,6 +107,7 @@ def process_new_documents():
     print("Finished checking for new documents.")
 
 if __name__ == "__main__":
+    # For monitoring of new files
     # schedule.every(1).minutes.do(process_new_documents)
     # while True:
     #     schedule.run_pending()
