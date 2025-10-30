@@ -12,7 +12,11 @@ dependencies = [
     "langchain-text-splitters (>=1.0.0,<2.0.0)",
     "pytelegrambotapi (>=4.29.1,<5.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    "schedule (>=1.2.2,<2.0.0)"
+    "schedule (>=1.2.2,<2.0.0)",
+    "markdown (>=3.9,<4.0)",
+    "pypandoc (>=1.15,<2.0)",
+    "beautifulsoup4 (>=4.14.2,<5.0.0)",
+    "pandoc (>=2.4,<3.0)"
 ]
 
 

@@ -1,59 +1,35 @@
-# Core Framework
-fastapi>=0.104.0,<0.105.0
-uvicorn[standard]>=0.24.0,<0.25.0
-pydantic>=2.5.0,<3.0.0
-pydantic-settings>=2.1.0,<3.0.0
-
-# Database
-sqlalchemy>=2.0.23,<3.0.0
-psycopg2-binary>=2.9.9,<3.0.0
-alembic>=1.13.1,<2.0.0
-
-# Vector Database (Qdrant Cloud)
-qdrant-client>=1.7.0,<2.0.0
-
-# AI & ML
-openai>=1.3.7,<2.0.0
-numpy>=1.24.0,<2.0.0
-scikit-learn>=1.3.0,<2.0.0
-sentence-transformers>=2.2.0,<3.0.0
-
-# LangChain & AI Framework
-langchain>=0.1.0,<1.0.0
-langchain-openai>=0.0.5,<1.0.0
-langchain-community>=0.0.10,<1.0.0
-langchain-core>=0.1.0,<1.0.0
-
-# File Processing
-PyMuPDF>=1.23.0,<2.0.0
-python-magic>=0.4.27,<1.0.0
-PyPDF2>=3.0.1,<4.0.0
-python-docx>=1.1.0,<2.0.0
-docx2txt>=0.8,<1.0.0  # DOC file text extraction
-openpyxl>=3.1.0,<4.0.0
-xlrd>=2.0.0,<3.0.0
-Pillow>=10.0.0,<11.0.0
-pandas>=2.0.0,<3.0.0
-markdown>=3.5.0,<4.0.0
-python-pptx>=0.6.0,<1.0.0
-striprtf>=0.0.26,<1.0.0
-
-# OCR Processing
-pytesseract>=0.3.10,<1.0.0
-
-
-# Environment & Configuration
-python-dotenv>=1.0.0,<2.0.0
-click>=8.1.0,<9.0.0
-
-# Testing & Development
-pytest>=7.4.0,<8.0.0
-pytest-asyncio>=0.21.0,<1.0.0
-
-# Utilities
-python-dateutil>=2.8.0,<3.0.0
-pytz>=2023.0,<2024.0
-
-# Cloud Services
-supabase>=2.0.0,<3.0.0
-
+annotated-types==0.7.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+anyio==4.11.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+beautifulsoup4==4.14.2 ; python_version >= "3.12" and python_full_version < "4.0.0"
+certifi==2025.10.5 ; python_version >= "3.12" and python_full_version < "4.0.0"
+charset-normalizer==3.4.4 ; python_version >= "3.12" and python_full_version < "4.0.0"
+greenlet==3.2.4 ; python_version >= "3.12" and python_full_version < "4.0.0" and (platform_machine == "aarch64" or platform_machine == "ppc64le" or platform_machine == "x86_64" or platform_machine == "amd64" or platform_machine == "AMD64" or platform_machine == "win32" or platform_machine == "WIN32")
+h11==0.16.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+httpcore==1.0.9 ; python_version >= "3.12" and python_full_version < "4.0.0"
+httpx==0.28.1 ; python_version >= "3.12" and python_full_version < "4.0.0"
+idna==3.11 ; python_version >= "3.12" and python_full_version < "4.0.0"
+jsonpatch==1.33 ; python_version >= "3.12" and python_full_version < "4.0.0"
+jsonpointer==3.0.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+langchain-core==1.0.1 ; python_version >= "3.12" and python_full_version < "4.0.0"
+langchain-text-splitters==1.0.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+langsmith==0.4.38 ; python_version >= "3.12" and python_full_version < "4.0.0"
+markdown==3.9 ; python_version >= "3.12" and python_full_version < "4.0.0"
+orjson==3.11.4 ; python_version >= "3.12" and python_full_version < "4.0.0" and platform_python_implementation != "PyPy"
+packaging==25.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+pydantic-core==2.41.4 ; python_version >= "3.12" and python_full_version < "4.0.0"
+pydantic==2.12.3 ; python_version >= "3.12" and python_full_version < "4.0.0"
+pypandoc==1.15 ; python_version >= "3.12" and python_full_version < "4.0.0"
+pytelegrambotapi==4.29.1 ; python_version >= "3.12" and python_full_version < "4.0.0"
+python-dotenv==1.2.1 ; python_version >= "3.12" and python_full_version < "4.0.0"
+pyyaml==6.0.3 ; python_version >= "3.12" and python_full_version < "4.0.0"
+requests-toolbelt==1.0.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+requests==2.32.5 ; python_version >= "3.12" and python_full_version < "4.0.0"
+schedule==1.2.2 ; python_version >= "3.12" and python_full_version < "4.0.0"
+sniffio==1.3.1 ; python_version >= "3.12" and python_full_version < "4.0.0"
+soupsieve==2.8 ; python_version >= "3.12" and python_full_version < "4.0.0"
+sqlalchemy==2.0.44 ; python_version >= "3.12" and python_full_version < "4.0.0"
+tenacity==9.1.2 ; python_version >= "3.12" and python_full_version < "4.0.0"
+typing-extensions==4.15.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+typing-inspection==0.4.2 ; python_version >= "3.12" and python_full_version < "4.0.0"
+urllib3==2.5.0 ; python_version >= "3.12" and python_full_version < "4.0.0"
+zstandard==0.25.0 ; python_version >= "3.12" and python_full_version < "4.0.0"

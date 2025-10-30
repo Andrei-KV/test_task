@@ -4,22 +4,29 @@ import markdown
 from bs4 import BeautifulSoup
 import pypandoc
 
-def parse_docx(content: bytes) -> str:
+def parse_docx(content) -> str:
     """Parses a .docx file and returns its text content."""
     return pypandoc.convert_text(content, 'plain', format='docx')
 
-def parse_doc(content: bytes) -> str:
+def parse_doc(content) -> str:
     """Parses a .doc file and returns its text content."""
     return pypandoc.convert_text(content, 'plain', format='doc')
 
-def parse_rtf(content: bytes) -> str:
+def parse_rtf(content) -> str:
     """Parses an .rtf file and returns its text content."""
     return pypandoc.convert_text(content, 'plain', format='rtf')
 
 def parse_md(content: str) -> str:
-    """Parses a .md file and returns its text content."""
+ 
+    # 1. Convert Markdown to HTML
     html = markdown.markdown(content)
-    return ''.join(BeautifulSoup(html, "html.parser").findAll(text=True))
+    
+    # 2. Parse the HTML
+    soup = BeautifulSoup(html, "html.parser")
+    
+    text_content = soup.get_text(separator="\n", strip=True)
+    
+    return text_content
 
 def parse_txt(content: str) -> str:
     """Parses a .txt file and returns its text content."""

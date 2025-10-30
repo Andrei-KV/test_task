@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     """Отправляет приветственное сообщение и предлагает задать вопрос."""
+    logger.info(f"Received /start command from user {message.from_user.id}")
     bot.reply_to(
         message, 
         f"👋 Привет, {message.from_user.first_name}!\n"
@@ -35,6 +36,7 @@ def send_welcome(message):
 @bot.message_handler(func=lambda message: True)
 def handle_user_query_thread(message):
     """Запускает RAG-конвейер в отдельном потоке для предотвращения зависания бота."""
+    logger.info(f"Received a text message from user {message.from_user.id}")
     # Запускаем сложную логику в отдельном потоке
     Thread(target=process_rag_request, args=(message,)).start()
 
@@ -44,6 +46,7 @@ def process_rag_request(message):
     chat_id = message.chat.id
 
     # 1. Отправка уведомления о начале обработки
+    logger.info(f"Processing query for user {message.from_user.id}: '{user_query}'")
     processing_message = bot.send_message(chat_id, "⏳ Ваш вопрос в обработке...")
     message_id = processing_message.message_id
     
@@ -60,6 +63,7 @@ def process_rag_request(message):
             message_id=message_id,
             text=response_text
         )
+        logger.info(f"Successfully sent response to user {message.from_user.id}")
 
     except Exception as e:
         logger.error(f"Произошла ошибка RAG-конвейера: {e}")
@@ -72,6 +76,7 @@ def process_rag_request(message):
 
 
 if __name__ == '__main__':
+    logger.info("Bot is starting up...")
     print("🚀 Бот запущен. Нажмите Ctrl+C для остановки.")
     try:
         # Бот начинает опрос сервера Telegram

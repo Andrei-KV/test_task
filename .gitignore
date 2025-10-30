@@ -5,3 +5,4 @@ draft.txt
 *.json
 *.env
 test_file.py
+clear_qdrant.py

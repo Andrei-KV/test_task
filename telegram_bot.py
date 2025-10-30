@@ -12,11 +12,11 @@ LLM_CLIENT = None  # Инициализируйте ваш LLM клиент
 QDRANT_CLIENT = None # Инициализируйте ваш Qdrant клиент
 LIMIT_K = 10 
 
-# Замените на ваш фактический импорт и инициализацию
-# from your_db_module import engine 
-# from your_rag_module import semantic_search, retrieve_full_context 
-# from your_llm_module import generate_rag_response_deepseek
-from test_file import generate_rag_response, vectorize_query, embedding_model, context, client, web_link
+# # Замените на ваш фактический импорт и инициализацию
+# # from your_db_module import engine 
+# # from your_rag_module import semantic_search, retrieve_full_context 
+# # from your_llm_module import generate_rag_response_deepseek
+# from test_file import generate_rag_response, vectorize_query, embedding_model, context, client, web_link
 
 # --- Инициализация бота ---
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -44,45 +44,47 @@ def send_welcome(message):
 @bot.message_handler(func=lambda message: True)
 def handle_user_query_thread(message):
     """Запускает RAG-конвейер в отдельном потоке для предотвращения зависания бота."""
-    # Запускаем сложную логику в отдельном потоке
-    Thread(target=process_rag_request, args=(message,)).start()
+    # # Запускаем сложную логику в отдельном потоке
+    # Thread(target=process_rag_request, args=(message,)).start()
+    bot.reply_to(
+        message, 
+        f"!!!!!!{15}.")
+# def process_rag_request(message):
+#     """Основная логика RAG-конвейера."""
+#     user_query = message.text
+#     chat_id = message.chat.id
 
-def process_rag_request(message):
-    """Основная логика RAG-конвейера."""
-    user_query = message.text
-    chat_id = message.chat.id
-
-    # 1. Отправка уведомления о начале обработки
-    processing_message = bot.send_message(chat_id, "⏳ Ваш вопрос в обработке...")
-    message_id = processing_message.message_id
+#     # 1. Отправка уведомления о начале обработки
+#     processing_message = bot.send_message(chat_id, "⏳ Ваш вопрос в обработке...")
+#     message_id = processing_message.message_id
     
-    try:
-        # --- RAG: Поиск и Извлечение ---
-        query_vector  = vectorize_query(user_query, embedding_model)
-        final_answer = generate_rag_response(context, user_query, client)
-            # 4. Формирование финального сообщения
-        response_text = f"""
-{final_answer}
+#     try:
+#         # --- RAG: Поиск и Извлечение ---
+#         query_vector  = vectorize_query(user_query, embedding_model)
+#         final_answer = generate_rag_response(context, user_query, client)
+#             # 4. Формирование финального сообщения
+#         response_text = f"""
+# {final_answer}
 
----
-🔗 **Исходный документ:** {web_link if web_link else 'Ссылка на документ не найдена.'}
-"""
+# ---
+# 🔗 **Исходный документ:** {web_link if web_link else 'Ссылка на документ не найдена.'}
+# """
             
-        # 5. Отправка финального сообщения (редактируем "В обработке...")
-        bot.edit_message_text(
-            chat_id=chat_id, 
-            message_id=message_id, 
-            text=response_text
-        )
+#         # 5. Отправка финального сообщения (редактируем "В обработке...")
+#         bot.edit_message_text(
+#             chat_id=chat_id, 
+#             message_id=message_id, 
+#             text=response_text
+#         )
 
-    except Exception as e:
-        logger.error(f"Произошла ошибка RAG-конвейера: {e}")
-        # Отправка сообщения об ошибке пользователю
-        bot.edit_message_text(
-            chat_id=chat_id, 
-            message_id=message_id, 
-            text=f"Произошла непредвиденная ошибка при обработке запроса: {e}"
-        )
+#     except Exception as e:
+#         logger.error(f"Произошла ошибка RAG-конвейера: {e}")
+#         # Отправка сообщения об ошибке пользователю
+#         bot.edit_message_text(
+#             chat_id=chat_id, 
+#             message_id=message_id, 
+#             text=f"Произошла непредвиденная ошибка при обработке запроса: {e}"
+#         )
 
 
 if __name__ == '__main__':
