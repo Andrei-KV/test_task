@@ -33,16 +33,19 @@ def process_new_documents():
         return
 
     with SessionLocal() as session:
+        existing_ids = session.execute(
+            select(Document.drive_file_id)
+        ).scalars().all()
+        # To Set для быстрой проверки 
+        existing_ids_set = set(existing_ids)
+
         for file_info in files_in_folder:
             file_id = file_info["ID Файла"]
             file_name = file_info["Имя Файла"]
             file_mime_type = file_info["MIME Тип"]
             # Check doc in database
-            existing_doc = session.execute(
-                select(Document).where(Document.drive_file_id == file_id)
-            ).scalar_one_or_none()
-
-            if existing_doc:
+            if file_id in existing_ids_set:
+                # Документ уже проиндексирован, пропускаем
                 continue
 
             print(f"Processing new document: {file_name}")
