@@ -2,7 +2,7 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from config import QDRANT_HOST, COLLECTION_NAME, EMBEDDING_MODEL_NAME
-from database.models import DocumentChunk
+from database import DocumentChunk
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from uuid import uuid4
@@ -11,13 +11,29 @@ from uuid import uuid4
 if (QDRANT_HOST is None) or (COLLECTION_NAME is None) or (EMBEDDING_MODEL_NAME is None):
     raise ValueError("Переменные не найдены. Проверьте файл .env.")
 
+# Для исправления утечки RAM
+_embedding_model = None
+_qdrant_client = None
+
 def get_embedding_model():
-    """Returns the embedding model."""
-    return SentenceTransformer(EMBEDDING_MODEL_NAME)
+    """
+    Returns a singleton instance of the embedding model.
+    Initializes the model on the first call.
+    """
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return _embedding_model
 
 def get_qdrant_client():
-    """Returns the Qdrant client."""
-    return QdrantClient(url=QDRANT_HOST)
+    """
+    Returns a singleton instance of the Qdrant client.
+    Initializes the client on the first call.
+    """
+    global _qdrant_client
+    if _qdrant_client is None:
+        _qdrant_client = QdrantClient(url=QDRANT_HOST)
+    return _qdrant_client
 
 def create_qdrant_collection(qdrant_client: QdrantClient, vector_dimension: int):
     """Creates a new collection in Qdrant if it doesn't already exist."""

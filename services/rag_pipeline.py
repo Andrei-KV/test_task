@@ -31,7 +31,7 @@ def vectorize_query(query: str, model: SentenceTransformer) -> list[float]:
     logger.info("User query vectorized successfully.")
     return query_embedding
 
-def semantic_search(query_vector: list[float], qdrant_client: QdrantClient, limit_k: int = 5):
+def semantic_search(query_vector: list[float], qdrant_client: QdrantClient, limit_k: int = 7):
     """Performs a semantic search in Qdrant."""
     logger.info("Performing semantic search in Qdrant...")
     search_result = qdrant_client.query_points(
@@ -50,8 +50,10 @@ def semantic_search(query_vector: list[float], qdrant_client: QdrantClient, limi
 def retrieve_full_context(qdrant_results, session: Session) -> tuple:
     """Retrieves the full text context from PostgreSQL based on Qdrant results."""
     logger.info("Retrieving full context from PostgreSQL...")
+    logger.info(f"qdrant_results: {qdrant_results}")
     try:
         top_document_id = qdrant_results[0].payload.get('document_id')
+        logger.info(f"top_document_id: {top_document_id}")
     except (IndexError, KeyError):
         logger.warning("No document ID found in Qdrant results.")
         return " ", None
@@ -61,7 +63,7 @@ def retrieve_full_context(qdrant_results, session: Session) -> tuple:
         for result in qdrant_results
         if result.payload.get('document_id') == top_document_id
     ]
-
+    logger.info(f"relevant_chunk_ids: {relevant_chunk_ids}")
     if not relevant_chunk_ids:
         logger.warning("No relevant chunk IDs found.")
         return " ", None
@@ -89,11 +91,11 @@ def generate_rag_response(context: str, user_query: str) -> str:
     """Generates a response using the RAG model."""
     logger.info("Generating RAG response...")
     SYSTEM_INSTRUCTIONS = (
-        "Вы — юридический ассистент. Ваша задача — синтезировать точный, "
-        "понятный и связный ответ на вопрос пользователя, используя ТОЛЬКО "
+        "Вы — юридический ассистент. Ваша задача — синтезировать "
+        "понятный и связный ответ на вопрос пользователя, используя "
         "предоставленный ниже контекст. Если контекст не содержит информации, "
         "достаточной для ответа, вы должны ответить: 'Извините, в предоставленных "
-        "документах точный ответ не найден.' Сохраняйте профессиональный тон и "
+        "документах точный ответ не найден. Уточните вопрос' Сохраняйте профессиональный тон и "
         "отвечайте на русском языке."
     )
     client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
@@ -104,7 +106,9 @@ def generate_rag_response(context: str, user_query: str) -> str:
                 {"role": "system", "content": f"{SYSTEM_INSTRUCTIONS}--- КОНТЕКСТ ---{context}"},
                 {"role": "user", "content": user_query},
             ],
-            stream=False
+            stream=False,
+            temperature=0.8, # Увеличиваем случайность (свободу)
+            top_p=0.9,       # Увеличиваем разнообразие выбора токенов
         )
         if not response:
             logger.error("Error generating response: No response object.")
@@ -116,6 +120,7 @@ def generate_rag_response(context: str, user_query: str) -> str:
         return f"❌ Произошла непредвиденная ошибка при генерации: {e}"
 
 def rag_pipeline(user_query: str) -> tuple[str, str | None]:
+    import sys
     """The main RAG pipeline."""
     logger.info("Starting RAG pipeline...")
     embedding_model = get_embedding_model()
@@ -130,6 +135,21 @@ def rag_pipeline(user_query: str) -> tuple[str, str | None]:
     if not context.strip():
         logger.warning("Context is empty, returning a default message.")
         return "Извините, в предоставленных документах точный ответ не найден.", None
+    
+    # -----------------------------------------------------
+    # 🟢 ЛОГИКА ИЗМЕРЕНИЯ РАЗМЕРА КОНТЕКСТА В МБ 🟢
+    # -----------------------------------------------------
+    
+    # 1. Измерение размера в байтах с кодировкой UTF-8
+    size_bytes = len(context.encode('utf-8'))
+    
+    # 2. Конвертация байтов в мегабайты (1 МБ = 1024 * 1024 байт)
+    size_mb = size_bytes / (1024 * 1024)
+    
+    # 3. Вывод в логи
+    logger.info(f"💾 Контекст из базы: {size_bytes} байт, что составляет {size_mb:.4f} МБ.")
+    
+    # -----------------------------------------------------
 
     final_answer = generate_rag_response(context, user_query)
     logger.info("RAG pipeline finished successfully.")

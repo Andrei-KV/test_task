@@ -16,8 +16,17 @@ if __name__ == "__main__":
     logger.info("Initializing application processes...")
 
     # process_new_documents()
-    print("🚀 Telegram bot is starting...")
-    bot.polling(none_stop=True)
-
-    logger.info("Both processes have been started.")
-
+ 
+    while True:
+        try:
+            print("🚀 Telegram bot is starting...")
+            bot.polling(none_stop=True, timeout=80) 
+            
+        except Exception as e:
+            # Ловит общие ошибки, включая ReadTimeoutError, TimeoutError, 
+            # ConnectionResetError, и даже ошибки авторизации/сети.
+            logger.error(f"❌ Критическая ошибка Polling: {e}. Перезапуск через 10 секунд...")
+            
+            # Ждем перед попыткой перезапуска, чтобы избежать DDOS на Telegram
+            time.sleep(10) 
+            # Цикл while True гарантирует, что код вернется к try и попробует polling снова.
