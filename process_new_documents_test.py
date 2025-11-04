@@ -1,8 +1,8 @@
 import time
 import schedule
 from sqlalchemy.orm import Session
-from sqlalchemy import select
-from database.database import SessionLocal, engine
+from sqlalchemy import select, inspect
+from database.database import SessionLocal, engine, init_db
 from database.models import Document
 from services import init_drive_service, list_files_in_folder, download_drive_file_content, get_drive_web_link
 from services import (
@@ -32,6 +32,12 @@ def process_new_documents():
     """Checks for new documents in Google Drive, processes them, and adds them to the database."""
     logger.info("Checking for new documents...")
     
+    inspector = inspect(engine)
+    if not inspector.has_table("documents"):
+        logger.info("Database not found, initializing...")
+        init_db()
+        logger.info("Database initialized.")
+
     drive_service = init_drive_service(SERVICE_ACCOUNT_FILE)
     if not drive_service:
         logger.error("Failed to initialize Google Drive service.")

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------
+  # 1. PostgreSQL Service (База данных для чанков и метаданных)
+  # ----------------------------------------------------------------
+  postgres_db:
+    image: postgres:16-alpine # Используем легкий образ
+    container_name: legal_rag_postgres
+    restart: always
+    environment:
+      # Настройки, соответствующие вашему DB_URI:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: legal_rag_db
+    ports:
+      # Маппинг порта: [хост]:[контейнер]
+      - "5432:5432"
+    volumes:
+      # Сохранение данных на хосте (данные не будут потеряны при перезапуске)
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------
+  # 2. Qdrant Service (Векторная база данных)
+  # ----------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: legal_rag_qdrant
+    restart: always
+    environment:
+      # Настройки Qdrant (можно оставить по умолчанию)
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    ports:
+      # Порт REST API (соответствует вашему QDRANT_HOST)
+      - "6333:6333"
+      # Порт gRPC
+      - "6334:6334"
+    volumes:
+      # Сохранение данных Qdrant (критично для сохранения векторов)
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  postgres_data:
+  qdrant_data:
