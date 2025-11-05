@@ -9,10 +9,7 @@ from services import (
     parse_docx, parse_doc, parse_rtf, parse_md, parse_txt,
     clean_text, split_text_into_chunks
 )
-from services import (
-    get_embedding_model, get_qdrant_client, create_qdrant_collection,
-    vectorize_chunks, create_qdrant_points, upsert_points_to_qdrant
-)
+from services import indexing_pipe_line
 from config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID
 from uuid import uuid4
 from database.models import DocumentChunk
@@ -121,16 +118,16 @@ def process_new_documents():
             logger.info("Committed new chunks to the database.")
 
 
-            embedding_model = get_embedding_model()
-            qdrant_client = get_qdrant_client()
-            create_qdrant_collection(qdrant_client, 768)
+            #TEST embedding_model = get_embedding_model()
+            # qdrant_client = get_qdrant_client()
+            # create_qdrant_collection(qdrant_client, 768)
 
-            texts_to_embed = [c.content for c in chunk_objects_to_process]
-            embeddings = vectorize_chunks(embedding_model, texts_to_embed)
-            points = create_qdrant_points(chunk_objects_to_process, embeddings)
-            upsert_points_to_qdrant(qdrant_client, points)
+            #TEST texts_to_embed = [c.content for c in chunk_objects_to_process]
+            #TEST embeddings = vectorize_chunks(embedding_model, texts_to_embed)
+            # points = create_qdrant_points(chunk_objects_to_process, embeddings)
+            # upsert_points_to_qdrant(qdrant_client, points)
+            indexing_pipe_line.run(chunk_objects_to_process)
             
-            logger.info(f"Upserted {len(points)} points to Qdrant for file: {file_name}")
     logger.info("Finished checking for new documents.")
 
 
