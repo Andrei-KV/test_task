@@ -3,7 +3,7 @@ import logging
 from threading import Thread
 from config import TELEGRAM_TOKEN
 
-from services import rag_pipeline
+from services import run_rag_pipeline
 
 # Variables check
 if TELEGRAM_TOKEN is None:
@@ -51,13 +51,13 @@ def process_rag_request(message):
     message_id = processing_message.message_id
     
     try:
-        final_answer, web_link = rag_pipeline(user_query)
+        final_answer, web_link = run_rag_pipeline(user_query)
         response_text = f"""
-{final_answer}
+                {final_answer}
 
----
-🔗 **Исходный документ:** {web_link if web_link else 'Ссылка на документ не найдена.'}
-"""
+                ---
+                🔗 **Исходный документ:** {web_link if web_link else 'Ссылка на документ не найдена.'}
+            """
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,

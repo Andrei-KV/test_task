@@ -35,14 +35,14 @@ class EmbeddingService:
 
     def vectorize_chunks(self, chunks: list[str]) -> list[list[float]]:
         """Векторизует список текстовых фрагментов, используя инкапсулированную модель."""
-        logger.info("Vectorizing user query...")
+        logger.info("Vectorizing user file...")
         embeddings = self.__model.encode(
             chunks,
             show_progress_bar=True,
             normalize_embeddings=True,
             convert_to_tensor=False
         ).tolist()
-        logger.info("User query vectorized successfully.")
+        logger.info("Text vectorized successfully.")
         return embeddings
 
 class QdrantClientWrapper:
@@ -130,3 +130,101 @@ class IndexingPipeline:
         self.__qdrant.upsert_points(points)
         
         logger.info("✅ Индексация завершена.")
+
+# --- Композиционный корень (Настройка и запуск) ---
+
+# 1. Инициализация зависимости EmbeddingService
+# Создаем экземпляр, передавая имя модели из конфигурации. 
+# Тяжелая модель SentenceTransformer будет загружена здесь один раз.
+embedding_service_instance = EmbeddingService(model_name=EMBEDDING_MODEL_NAME)
+
+# 2. Инициализация зависимости QdrantClientWrapper
+# Создаем экземпляр, передавая хост и имя коллекции.
+qdrant_wrapper_instance = QdrantClientWrapper(
+    host=QDRANT_HOST, 
+    collection_name=COLLECTION_NAME
+)
+
+# 3. Внедрение зависимостей (Dependency Injection)
+# Создаем экземпляр оркестратора IndexingPipeline, передавая ему 
+# готовые и настроенные сервисы.
+indexing_pipe_line = IndexingPipeline(
+    embedding_service=embedding_service_instance,
+    qdrant_wrapper=qdrant_wrapper_instance
+)
+
+# TEST def get_embedding_model():
+#     """
+#     Returns a singleton instance of the embedding model.
+#     Initializes the model on the first call.
+#     """
+#     global _embedding_model
+#     if _embedding_model is None:
+#         _embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+#     return _embedding_model
+
+# TEST def get_qdrant_client():
+#     """
+#     Returns a singleton instance of the Qdrant client.
+#     Initializes the client on the first call.
+#     """
+#     global _qdrant_client
+#     if _qdrant_client is None:
+#         _qdrant_client = QdrantClient(url=QDRANT_HOST)
+#     return _qdrant_client
+
+# TEST def create_qdrant_collection(qdrant_client: QdrantClient, vector_dimension: int):
+#     """Creates a new collection in Qdrant if it doesn't already exist."""
+#     try:
+#         if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
+#             qdrant_client.create_collection(
+#                 collection_name=COLLECTION_NAME,
+#                 vectors_config=VectorParams(size=vector_dimension, distance=Distance.COSINE),
+#             )
+#             print(f"✅ Collection '{COLLECTION_NAME}' created.")
+#         else:
+#             print(f"✅ Collection '{COLLECTION_NAME}' already exists.")
+#     except Exception as e:
+#         print(f"❌ Qdrant error: {e}. Make sure Qdrant is running.")
+
+# def vectorize_chunks(embedding_model: SentenceTransformer, chunks: list[str]) -> list[list[float]]:
+#     """Vectorizes a list of text chunks."""
+#     embeddings = embedding_model.encode(
+#         chunks,
+#         show_progress_bar=True,
+#         normalize_embeddings=True,
+#         convert_to_tensor=False
+#     ).tolist()
+#     return embeddings
+
+# def create_qdrant_points(chunk_objects: list[DocumentChunk], embeddings: list[list[float]]) -> list[PointStruct]:
+#     """Creates a list of PointStruct objects for upserting into Qdrant."""
+#     points = []
+#     for idx, vector in enumerate(embeddings):
+#         chunk_obj = chunk_objects[idx]
+#         qdrant_id_int = int(chunk_obj.qdrant_id.replace('-', '')[:15], 16)
+#         payload = {
+#             "chunk_id": chunk_obj.chunk_id,
+#             "document_id": chunk_obj.document_id,
+#             "content_preview": chunk_obj.content[:100] + "..."
+#         }
+#         point = PointStruct(
+#             id=qdrant_id_int,
+#             vector=vector,
+#             payload=payload
+#         )
+#         points.append(point)
+#     return points
+
+# def upsert_points_to_qdrant(qdrant_client: QdrantClient, points: list[PointStruct]):
+#     """Upserts a list of points into a Qdrant collection."""
+#     try:
+#         qdrant_client.upsert(
+#             collection_name=COLLECTION_NAME,
+#             wait=True,
+#             points=points
+#         )
+#         print(f"✅ {len(points)} vectors successfully uploaded to Qdrant (Collection: {COLLECTION_NAME}).")
+#     except Exception as e:
+#         print(f"❌ Error uploading to Qdrant: {e}")
+

@@ -1,9 +1,9 @@
 
-import schedule
+# import schedule
 import time
 import logging
 from telegram_bot.bot import bot  # Явный импорт
-from google_drive_listener import process_new_documents
+# from google_drive_listener import process_new_documents
 
 # Настройка логирования
 logging.basicConfig(
@@ -15,18 +15,22 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logger.info("Initializing application processes...")
 
-    # process_new_documents()
- 
     while True:
         try:
             print("🚀 Telegram bot is starting...")
+            # 1. Запуск блокирующего процесса
             bot.polling(none_stop=True, timeout=80) 
             
+        # ⚠️ ПЕРВОЕ ИСКЛЮЧЕНИЕ: Ловим KeyboardInterrupt (Ctrl+C)
+        except KeyboardInterrupt:
+            logger.info("✅ Завершение работы по команде пользователя (Ctrl+C)...")
+            break  # Выход из цикла while True для корректного завершения программы
+            
+        # ⚠️ ВТОРОЕ ИСКЛЮЧЕНИЕ: Ловим ВСЕ остальные ошибки, требующие перезапуска
         except Exception as e:
-            # Ловит общие ошибки, включая ReadTimeoutError, TimeoutError, 
-            # ConnectionResetError, и даже ошибки авторизации/сети.
             logger.error(f"❌ Критическая ошибка Polling: {e}. Перезапуск через 10 секунд...")
             
-            # Ждем перед попыткой перезапуска, чтобы избежать DDOS на Telegram
+            # Ждем перед попыткой перезапуска
             time.sleep(10) 
-            # Цикл while True гарантирует, что код вернется к try и попробует polling снова.
+            
+    logger.info("Приложение Telegram бота успешно остановлено.")
