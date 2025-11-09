@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from services.rag_pipeline import run_rag_pipeline
 import logging
 import aioredis
@@ -18,6 +20,8 @@ app = FastAPI(
     description="API for interacting with the RAG pipeline.",
     version="1.0.0"
 )
+
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 redis_client = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}", encoding="utf-8", decode_responses=True)
 
@@ -51,7 +55,7 @@ async def reset_clarification_count(user_id: str):
 
 @app.get("/")
 async def read_root():
-    return {"message": "RAG API is running"}
+    return FileResponse('frontend/index.html')
 
 @app.post("/query")
 async def query(query: Query):
