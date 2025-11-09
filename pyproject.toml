@@ -17,10 +17,25 @@ dependencies = [
     "pypandoc (>=1.15,<2.0)",
     "beautifulsoup4 (>=4.14.2,<5.0.0)",
     "pandoc (>=2.4,<3.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)"
+    "psycopg2-binary (>=2.9.11,<3.0.0)",
+    "fastapi (>=0.121.1,<0.122.0)",
+    "uvicorn (>=0.38.0,<0.39.0)",
+    "pydantic (>=2.12.4,<3.0.0)",
+    "python-multipart (>=0.0.20,<0.0.21)",
+    "websockets (>=15.0.1,<16.0.0)",
+    "jinja2 (>=3.1.6,<4.0.0)",
+    "python-jose[cryptography] (>=3.5.0,<4.0.0)",
+    "redis (>=7.0.1,<8.0.0)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=8.2,<9.0)",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "freezegun (>=1.5.5,<2.0.0)"
+]

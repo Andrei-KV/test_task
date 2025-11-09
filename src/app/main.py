@@ -2,8 +2,9 @@
 # import schedule
 import time
 import logging
-from telegram_bot.bot import bot  # Явный импорт
-# from google_drive_listener import process_new_documents
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Настройка логирования
 logging.basicConfig(
@@ -11,6 +12,24 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Инициализация FastAPI
+app = FastAPI(title="RAG Chatbot")
+
+# Настройка CORS Cross-Origin Resource Sharing
+origins = [
+    "http://localhost",
+    "http://localhost:8080",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# Обслуживание статических файлов
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 if __name__ == "__main__":
     logger.info("Initializing application processes...")
