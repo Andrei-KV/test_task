@@ -6,8 +6,11 @@ from openai import OpenAI
 from database.database import SessionLocal
 from database.models import Document, DocumentChunk
 from services.vectorization import EmbeddingService, QdrantClientWrapper
-from config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
+from config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME, REDIS_HOST, REDIS_PORT, REDIS_DB
 import logging
+import aioredis
+import json
+import asyncio
 
 # Настройка логирования
 logging.basicConfig(
@@ -27,16 +30,23 @@ class QueryEmbeddingService:
     def __init__(self, model_name: str):
         # Загрузка тяжелого ресурса (SentenceTransformer) один раз
         self.__model = SentenceTransformer(model_name)
+        self.__redis_client = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}", encoding="utf-8", decode_responses=True)
 
-    def vectorize_query(self, query: str) -> list[float]:
+    async def vectorize_query(self, query: str) -> list[float]:
         """Векторизует один текстовый запрос для поиска."""
+        cached_embedding = await self.__redis_client.get(f"embedding:{query}")
+        if cached_embedding:
+            logger.info("Found cached embedding for the query.")
+            return json.loads(cached_embedding)
+
         logger.info("Vectorizing user query...")
         query_embedding = self.__model.encode(
             [query],
             normalize_embeddings=True,
             convert_to_tensor=False
         ).tolist()[0]
-        logger.info("User query vectorized successfully.")
+        await self.__redis_client.set(f"embedding:{query}", json.dumps(query_embedding))
+        logger.info("User query vectorized and cached successfully.")
         return query_embedding
     
 
@@ -67,7 +77,10 @@ class QueryQdrantClient:
 class ContextRetriever:
     """Инкапсулирует логику извлечения полного контекста из PostgreSQL."""
 
-    def retrieve_full_context(self, qdrant_results, session: Session) -> tuple:
+    def __init__(self):
+        self.__redis_client = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}", encoding="utf-8", decode_responses=True)
+
+    async def retrieve_full_context(self, qdrant_results, session: Session) -> tuple:
         """Извлекает полный текстовый контекст по результатам Qdrant."""
         logger.info("Retrieving full context from PostgreSQL...")
     
@@ -77,32 +90,47 @@ class ContextRetriever:
             logger.warning("No document ID found in Qdrant results.")
             return " ", None, None
 
-        relevant_chunk_ids = [
+        relevant_chunk_ids = sorted([
             result.payload.get('chunk_id')
             for result in qdrant_results
             if result.payload.get('document_id') == top_document_id
-        ]
+        ])
         if not relevant_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
-            return " ", None
+            return " ", None, None
 
-        from sqlalchemy import select
-        stmt = (
-            select(DocumentChunk.content, Document.web_link)
-           .join(Document)
-           .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
-           .order_by(DocumentChunk.chunk_id)
-        )
-        sql_results = session.execute(stmt).fetchall()
+        cache_key = f"context:{','.join(map(str, relevant_chunk_ids))}"
+        cached_context = await self.__redis_client.get(cache_key)
+        if cached_context:
+            logger.info("Found cached context.")
+            data = json.loads(cached_context)
+            return data["context"], data["web_link"], top_document_id
+
+        def _get_context_from_db():
+            from sqlalchemy import select
+            stmt = (
+                select(DocumentChunk.content, Document.web_link)
+               .join(Document)
+               .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
+               .order_by(DocumentChunk.chunk_id)
+            )
+            return session.execute(stmt).fetchall()
+
+        loop = asyncio.get_event_loop()
+        sql_results = await loop.run_in_executor(None, _get_context_from_db)
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None
+            return " ", None, top_document_id
 
         full_context = [result.content for result in sql_results]
         web_link = sql_results[0].web_link
         context = "\n\n".join(full_context)
-        logger.info("Full context retrieved successfully.")
+
+        cache_data = json.dumps({"context": context, "web_link": web_link})
+        await self.__redis_client.set(cache_key, cache_data)
+
+        logger.info("Full context retrieved and cached successfully.")
         logger.debug(context[:500])
         return context, web_link, top_document_id
 
@@ -197,24 +225,34 @@ class RAGPipelineOrchestrator:
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
         self.__prompt_manager = prompt_manager # ✅ Сохраняем менеджер промптов
 
-    def run_pipeline(self, user_query: str) -> tuple[str, str | None]:
+    async def run_pipeline(self, user_query: str, history: list = None) -> tuple[str, str | None, float]:
         """Основной метод, выполняющий полный цикл RAG."""
         logger.info("Starting RAG pipeline...")
 
         # 1. Векторизация запроса
-        query_vector = self.__embedder.vectorize_query(user_query)
+        query_to_vectorize = user_query
+        if history:
+            context = " ".join([f"User: {h['user']} Bot: {h['bot']}" for h in history])
+            query_to_vectorize = context + " " + user_query
+
+        query_vector = await self.__embedder.vectorize_query(query_to_vectorize)
         
         # 2. Семантический поиск
         qdrant_results = self.__searcher.semantic_search(query_vector)
 
+        max_score = 0.0
+        if qdrant_results:
+            max_score = max(point.score for point in qdrant_results)
+
+        # 3. Извлечение контекста (управление транзакцией БД)
         # 3. Извлечение контекста (управление транзакцией БД)
         with self.__SessionLocal() as session:
-            context, web_link, top_document_id = self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, top_document_id = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
             # Используем NOT_FOUND_PROMPT из менеджера промптов
-            return self.__prompt_manager.get_not_found_message(), None
+            return self.__prompt_manager.get_not_found_message(), None, max_score
         
         # ЛОГИКА ДИНАМИЧЕСКОГО ВЫБОРА ПРОМПТА
         final_system_instructions = self.__prompt_manager.get_instructions_by_document_id(top_document_id)
@@ -231,7 +269,7 @@ class RAGPipelineOrchestrator:
             system_instructions=final_system_instructions # Передаем выбранные инструкции
         )
         logger.info("RAG pipeline finished successfully.")
-        return final_answer, web_link
+        return final_answer, web_link, max_score
 
 
 # =====================================================================
@@ -256,6 +294,6 @@ RAG_ORCHESTRATOR = RAGPipelineOrchestrator(
 )
 
 # 3. Публичная функция для использования в других модулях (например, в обработчике Telegram бота)
-def run_rag_pipeline(user_query: str) -> tuple[str, str | None]:
+async def run_rag_pipeline(user_query: str, history: list = None) -> tuple[str, str | None, float]:
     """Единственная публичная функция для запуска всего RAG-пайплайна."""
-    return RAG_ORCHESTRATOR.run_pipeline(user_query)
+    return await RAG_ORCHESTRATOR.run_pipeline(user_query, history)
