@@ -3,9 +3,6 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from config import QDRANT_HOST, COLLECTION_NAME, EMBEDDING_MODEL_NAME
-from database import DocumentChunk
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 from uuid import uuid4
 import logging
 

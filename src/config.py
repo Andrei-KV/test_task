@@ -22,5 +22,9 @@ EMBEDDING_MODEL_NAME = os.getenv('EMBEDDING_MODEL_NAME')
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 LLM_MODEL = "deepseek-chat"
 
+# Redis configuration
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+
 # Telegram bot configuration
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')

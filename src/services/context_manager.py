@@ -31,17 +31,19 @@ class ContextManagerService:
 
     async def get_clarification_count(self, session_id: str) -> int:
         """
-        Gets the current count of clarification questions for a session.
+        Gets the current count of clarification questions for a session by looking for the last system message.
         """
         history = await self._redis.get_history(session_id)
-        return history[-1].get("clarification_count", 0) if history and history[-1].get("role") == "system" else 0
+        for message in reversed(history):
+            if message.get("role") == "system" and "clarification_count" in message:
+                return message["clarification_count"]
+        return 0
 
     async def increment_clarification_count(self, session_id: str):
         """
         Increments the clarification question counter.
         """
-        history = await self._redis.get_history(session_id)
-        count = self.get_clarification_count(session_id)
+        count = await self.get_clarification_count(session_id)
         message = {
             "role": "system",
             "content": "A clarifying question was asked.",

@@ -80,6 +80,7 @@ def test_websocket_receives_mocked_response():
 # tests/integration/test_chat_integration.py
 import pytest
 import aioredis
+import json
 from fastapi.testclient import TestClient
 from src.app.main import app
 
