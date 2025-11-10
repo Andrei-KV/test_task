@@ -73,7 +73,7 @@ class ContextRetriever:
             top_document_id = qdrant_results[0].payload.get('document_id')
         except (IndexError, KeyError):
             logger.warning("No document ID found in Qdrant results.")
-            return " ", None, None, 0.0
+            return " ", None, None, None, 0.0
 
         relevant_chunk_ids = [
             result.payload.get('chunk_id')
@@ -82,11 +82,11 @@ class ContextRetriever:
         ]
         if not relevant_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
-            return " ", None, None, 0.0
+            return " ", None, None, None, 0.0
 
         from sqlalchemy import select
         stmt = (
-            select(DocumentChunk.content, Document.web_link)
+            select(DocumentChunk.content, Document.web_link, Document.title)
            .join(Document)
            .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
            .order_by(DocumentChunk.chunk_id)
@@ -95,15 +95,16 @@ class ContextRetriever:
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None, None, 0.0
+            return " ", None, None, None, 0.0
 
         full_context = [result.content for result in sql_results]
         web_link = sql_results[0].web_link
+        title = sql_results[0].title
         context = "\n\n".join(full_context)
         max_score = max([result.score for result in qdrant_results])
         logger.info("Full context retrieved successfully.")
         logger.debug(context[:500])
-        return context, web_link, top_document_id, max_score
+        return context, web_link, title, top_document_id, max_score
 
 
 class LLMGenerator:
@@ -113,17 +114,27 @@ class LLMGenerator:
         self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.__model_name = model_name
 
-    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, low_precision: bool = False) -> str:
+    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
         temperature = 0.6 if low_precision else 0.1
+
+        # Формируем финальный системный промпт с информацией о документе
+        final_system_prompt = (
+            f"{system_instructions}\n\n"
+            f"**Название документа:** {title}\n"
+            f"**Веб-ссылка на документ:** {web_link}\n\n"
+            f"--- **КОНТЕКСТ** ---\n"
+            f"{context}"
+        )
+
         try:
             response = await self.__client.chat.completions.create(
                 model=self.__model_name,
                 messages=[
-                {"role": "system", "content": f"{system_instructions}--- **КОНТЕКСТ** ---{context}"},
-                {"role": "user", "content": user_query},
-            ],
+                    {"role": "system", "content": final_system_prompt},
+                    {"role": "user", "content": user_query},
+                ],
                 stream=False,
                 temperature=temperature,
                 top_p=0.8,
@@ -146,20 +157,21 @@ class PromptManager:
     PROMPT_MAPPING = {
         "ID_DEFAULT": (
             "Ты — специализированный AI-ассистент, работающий исключительно на основе предоставленных "
-            "официальных документов техническо направленности"
+            "официальных документов технической направленности. У тебя есть название документа и веб-ссылка на него."
             "**ТВОИ ОСНОВНЫЕ ПРИНЦИПЫ:**"
             "1.**Точность и аутентичность:** Все твои ответы должны дословно или почти дословно основываться "
             "на предоставленном тексте. "
             "Нельзя привносить собственную интерпретацию, домыслы или знания извне."
-            "2.**Ссылка на источник:** Всегда указывай точный источник информации. "
-            "Формат: 'Согласно [название документа], пункт [номер пункта]...'."
+            "2.**Ссылка на источник:** В конце КАЖДОГО ответа ты ОБЯЗАН указывать источник информации в следующем формате: "
+            "'**Источник:** [Название документа], [Глава/Параграф/Пункт], страница [Номер страницы]. Ссылка на документ: [веб-ссылка]'."
+            "   - Если в тексте есть информация о номере главы, параграфа, пункта или страницы, используй её."
+            "   - Если такой информации нет, ссылайся только на название документа и веб-ссылку."
             "3.**Структурированность:** Если вопрос сложный, структурируй ответ, используя списки или четкие абзацы."
             "4.**Недопустимость вымысла:** Если в предоставленном тебе фрагменте нет информации для ответа на вопрос,"
             " категорически запрещено придумывать ответ. "
-            "Ты должен четко заявить попросить задать уточняющий вопрос. Если после двух уточняющих вопросов всё ещё "
-            "не хватает информации для ответа на вопрос,"
-            " то ты должен чётко сообщить об этом"
-            " Сохраняйте профессиональный тон и отвечайте на русском языке."
+            "В этом случае ты должен вежливо попросить пользователя задать уточняющий вопрос."
+            "Если после двух уточнений ответа всё ещё нет, сообщи об этом."
+            "Сохраняй профессиональный тон и отвечай на русском языке."
         ),
         # Добавить другие ID документов и соответствующие инструкции
     }
@@ -208,7 +220,7 @@ class RAGService:
 
         # 3. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, top_document_id, score = await self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, title, top_document_id, score = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
@@ -225,10 +237,12 @@ class RAGService:
         
         # 5. Генерация ответа
         final_answer = await self.__generator.generate_rag_response(
-            context=context, 
+            context=context,
             user_query=user_query,
             system_instructions=final_system_instructions,
-            low_precision=low_precision
+            low_precision=low_precision,
+            title=title,
+            web_link=web_link
         )
         logger.info("RAG pipeline finished successfully.")
         return final_answer, web_link, score

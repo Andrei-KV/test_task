@@ -26,6 +26,9 @@ async def websocket_endpoint(
         while True:
             data = await websocket.receive_text()
             await context_manager.add_message(client_id, "user", data)
+            
+            # Send "Processing..." message
+            await manager.send_personal_message("Идёт обработка...", websocket)
 
             context_window = await context_manager.get_context_window(client_id)
             context_query = " ".join([msg["content"] for msg in context_window])

@@ -8,6 +8,8 @@ from src.app import logging_config
 
 app = FastAPI(title="RAG Chatbot")
 
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
+
 templates = Jinja2Templates(directory="src/templates")
 
 app.add_middleware(

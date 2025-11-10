@@ -1,131 +1,85 @@
 <!DOCTYPE html>
 <html>
-    <head>
-        <title>RAG_BOT_DEMO</title>
-        <style>
-            body {
-                font-family: sans-serif;
-                background-color: #f5f5f5;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-            }
-            #chat-container {
-                width: 80%;
-                max-width: 800px;
-                height: 90vh;
-                display: flex;
-                flex-direction: column;
-                border: 1px solid #e0e0e0;
-                border-radius: 10px;
-                background-color: white;
-                box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            }
-            #header {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 15px;
-                border-bottom: 1px solid #e0e0e0;
-            }
-            #header img {
-                width: 32px;
-                height: 32px;
-                margin-right: 10px;
-            }
-            #messages {
-                flex-grow: 1;
-                padding: 20px;
-                overflow-y: auto;
-            }
-            .message {
-                margin-bottom: 15px;
-                display: flex;
-            }
-            .bot-message {
-                justify-content: flex-start;
-            }
-            .user-message {
-                justify-content: flex-end;
-            }
-            .message-content {
-                padding: 10px 15px;
-                border-radius: 20px;
-                max-width: 70%;
-            }
-            .bot-message .message-content {
-                background-color: #f1f0f0;
-            }
-            .user-message .message-content {
-                background-color: #dcf8c6;
-            }
-            #form {
-                display: flex;
-                padding: 20px;
-                border-top: 1px solid #e0e0e0;
-            }
-            #messageText {
-                flex-grow: 1;
-                padding: 10px;
-                border: 1px solid #ccc;
-                border-radius: 20px;
-                margin-right: 10px;
-            }
-            #form button {
-                padding: 10px 20px;
-                border: none;
-                background-color: #4CAF50;
-                color: white;
-                border-radius: 50%;
-                cursor: pointer;
-            }
-        </style>
-    </head>
-    <body>
-        <div id="chat-container">
-            <div id="header">
-                <img src="https://dewiar.com/images/logo.svg" alt="RAG_BOT_DEMO">
-                <h2>RAG_BOT_DEMO</h2>
-            </div>
-            <ul id='messages'>
-                <li class="message bot-message">
-                    <div class="message-content">Здравствуйте, я AI-ассистент. Спрашивайте, я отвечу на Ваши вопросы! 🚀</div>
-                </li>
-            </ul>
-            <form id="form" onsubmit="sendMessage(event)">
-                <input type="text" id="messageText" autocomplete="off" placeholder="Введите запрос"/>
-                <button>→</button>
-            </form>
+<head>
+    <title>RAG_BOT_DEMO</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="header">
+            <img src="static/logo/g10.png" alt="DEWIAR AI Logo" width="48" height="53">
+            <h2>DEWIAR AI</h2>
         </div>
-        <script>
-            var client_id = Date.now()
-            var ws = new WebSocket(`ws://localhost:8000/api/v1/ws/${client_id}`);
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                message.className = 'message bot-message';
-                var content = document.createElement('div');
-                content.className = 'message-content';
-                content.innerHTML = event.data;
-                message.appendChild(content);
-                messages.appendChild(message);
-            };
-            function sendMessage(event) {
-                var input = document.getElementById("messageText")
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                message.className = 'message user-message';
-                var content = document.createElement('div');
-                content.className = 'message-content';
-                content.innerHTML = input.value;
-                message.appendChild(content);
-                messages.appendChild(message);
-                ws.send(input.value)
-                input.value = ''
-                event.preventDefault()
+        <ul id='messages'>
+            </ul>
+        <form id="form" onsubmit="sendMessage(event)">
+            <input type="text" id="messageText" autocomplete="off" placeholder="Введите запрос" maxlength="500"/>
+            <div id="char-counter">0/500</div>
+            <button>→</button>
+        </form>
+    </div>
+    <script>
+        var client_id = Date.now();
+        var ws = new WebSocket(`ws://localhost:8000/api/v1/ws/${client_id}`);
+
+        ws.onopen = function(event) {
+            var messages = document.getElementById('messages');
+            var message = document.createElement('li');
+            message.className = 'message bot-message';
+            var content = document.createElement('div');
+            content.className = 'message-content';
+            content.innerHTML = "Здравствуйте, я AI-ассистент. Спрашивайте, я отвечу на Ваши вопросы! 🚀";
+            message.appendChild(content);
+            messages.appendChild(message);
+        };
+        
+        ws.onmessage = function(event) {
+            var messages = document.getElementById('messages');
+            var message = document.createElement('li');
+            message.className = 'message bot-message';
+            var content = document.createElement('div');
+            content.className = 'message-content';
+            content.innerHTML = event.data;
+            message.appendChild(content);
+            messages.appendChild(message);
+            messages.scrollTop = messages.scrollHeight; // Auto-scroll
+        };
+
+        function sendMessage(event) {
+            event.preventDefault();
+            var input = document.getElementById("messageText");
+            if (input.value.trim() === "") {
+                return;
             }
-        </script>
-    </body>
+
+            var messages = document.getElementById('messages');
+            var message = document.createElement('li');
+            message.className = 'message user-message';
+            var content = document.createElement('div');
+            content.className = 'message-content';
+            content.innerHTML = input.value;
+            message.appendChild(content);
+            messages.appendChild(message);
+            
+            ws.send(input.value);
+            input.value = '';
+            updateCharCounter();
+            messages.scrollTop = messages.scrollHeight; // Auto-scroll
+        }
+
+        const messageText = document.getElementById('messageText');
+        const charCounter = document.getElementById('char-counter');
+
+        function updateCharCounter() {
+            const currentLength = messageText.value.length;
+            charCounter.textContent = `${currentLength}/500`;
+        }
+
+        messageText.addEventListener('input', updateCharCounter);
+        updateCharCounter();
+    </script>
+</body>
 </html>
