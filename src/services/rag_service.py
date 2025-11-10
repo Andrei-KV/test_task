@@ -56,6 +56,7 @@ class QueryQdrantClient:
             query=query_vector,
             limit=limit_k,
             with_payload=True,
+            with_vectors=False,
             search_params=SearchParams(
                 exact=False,
                 hnsw_ef=100
@@ -76,7 +77,7 @@ class ContextRetriever:
             top_document_id = qdrant_results[0].payload.get('document_id')
         except (IndexError, KeyError):
             logger.warning("No document ID found in Qdrant results.")
-            return " ", None, None
+            return " ", None, None, 0.0
 
         relevant_chunk_ids = [
             result.payload.get('chunk_id')
@@ -85,7 +86,7 @@ class ContextRetriever:
         ]
         if not relevant_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
-            return " ", None, None
+            return " ", None, None, 0.0
 
         from sqlalchemy import select
         stmt = (
@@ -98,14 +99,15 @@ class ContextRetriever:
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None, None
+            return " ", None, None, 0.0
 
         full_context = [result.content for result in sql_results]
         web_link = sql_results[0].web_link
         context = "\n\n".join(full_context)
+        max_score = max([result.score for result in qdrant_results])
         logger.info("Full context retrieved successfully.")
         logger.debug(context[:500])
-        return context, web_link, top_document_id
+        return context, web_link, top_document_id, max_score
 
 
 class LLMGenerator:
@@ -119,6 +121,7 @@ class LLMGenerator:
     async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
+        temperature = 0.6 if low_precision else 0.1
         try:
             response = await self.__client.chat.completions.create(
                 model=self.__model_name,
@@ -127,7 +130,7 @@ class LLMGenerator:
                 {"role": "user", "content": user_query},
             ],
                 stream=False,
-                temperature=0.1,
+                temperature=temperature,
                 top_p=0.8,
                 max_tokens=1000,
             )
@@ -198,7 +201,7 @@ class RAGService:
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
         self.__prompt_manager = prompt_manager # ✅ Сохраняем менеджер промптов
 
-    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None]:
+    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None, float]:
         """Основной метод, выполняющий полный цикл RAG."""
         logger.info("Starting RAG pipeline...")
 
@@ -210,12 +213,12 @@ class RAGService:
 
         # 3. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, top_document_id = await self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, top_document_id, score = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
             # Используем NOT_FOUND_PROMPT из менеджера промптов
-            return self.__prompt_manager.get_not_found_message(), None
+            return self.__prompt_manager.get_not_found_message(), None, 0.0
         
         # ЛОГИКА ДИНАМИЧЕСКОГО ВЫБОРА ПРОМПТА
         final_system_instructions = self.__prompt_manager.get_instructions_by_document_id(top_document_id)
@@ -233,4 +236,4 @@ class RAGService:
             low_precision=low_precision
         )
         logger.info("RAG pipeline finished successfully.")
-        return final_answer, web_link
+        return final_answer, web_link, score
