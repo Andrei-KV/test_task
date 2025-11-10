@@ -2,8 +2,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from .routers import chat
+from src.app.routers import chat
 import uvicorn
+from src.app import logging_config
 
 app = FastAPI(title="RAG Chatbot")
 
