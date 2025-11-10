@@ -2,7 +2,7 @@ import time
 import schedule
 from sqlalchemy.orm import Session
 from sqlalchemy import select, inspect
-from src.database.database import SessionLocal, engine, init_db
+from src.database.database import AsyncSessionLocal, async_engine, init_db
 from src.database.models import Document
 from src.services.google_drive import init_drive_service, list_files_in_folder, download_drive_file_content, get_drive_web_link
 from src.services.document_processor import (
@@ -29,7 +29,7 @@ def process_new_documents():
     """Checks for new documents in Google Drive, processes them, and adds them to the database."""
     logger.info("Checking for new documents...")
     
-    inspector = inspect(engine)
+    inspector = inspect(async_engine)
     if not inspector.has_table("documents"):
         logger.info("Database not found, initializing...")
         init_db()
@@ -45,7 +45,7 @@ def process_new_documents():
         logger.info("No files found in the target folder.")
         return
 
-    with SessionLocal() as session:
+    with AsyncSessionLocal() as session:
         existing_ids = session.execute(
             select(Document.drive_file_id)
         ).scalars().all()

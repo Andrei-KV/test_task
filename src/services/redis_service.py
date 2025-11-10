@@ -1,6 +1,6 @@
-import aioredis
 from typing import Optional, List
 import json
+from redis.asyncio import Redis
 from ..config import REDIS_HOST, REDIS_PORT
 
 class RedisService:
@@ -8,23 +8,24 @@ class RedisService:
     An asynchronous Redis client for storing and retrieving conversation history.
     """
     def __init__(self, host: str = REDIS_HOST, port: int = REDIS_PORT):
-        self._redis = None
+        self._redis: Optional[Redis] = None
         self._host = host
         self._port = port
 
     async def connect(self):
         """
-        Establishes the Redis connection pool.
+        Establishes the Redis connection.
         """
         if not self._redis:
-            self._redis = await aioredis.from_url(f"redis://{self._host}:{self._port}")
+            self._redis = Redis(host=self._host, port=self._port, decode_responses=True)
 
     async def disconnect(self):
         """
-        Closes the Redis connection pool.
+        Closes the Redis connection.
         """
         if self._redis:
             await self._redis.close()
+            await self._redis.connection_pool.disconnect()
             self._redis = None
 
     async def get_history(self, session_id: str) -> List[dict]:

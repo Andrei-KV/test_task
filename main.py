@@ -2,9 +2,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from .routers import chat
+from src.app.routers import chat
 import uvicorn
-from . import logging_config
+from src.app import logging_config
 
 app = FastAPI(title="RAG Chatbot")
 
@@ -18,7 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 @app.get("/")
 async def get(request: Request):
