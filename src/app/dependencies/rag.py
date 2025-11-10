@@ -1,4 +1,4 @@
-from src.services.rag_service import (
+from ...services.rag_service import (
     QueryEmbeddingService,
     QueryQdrantClient,
     ContextRetriever,
@@ -6,8 +6,8 @@ from src.services.rag_service import (
     PromptManager,
     RAGService,
 )
-from src.database.database import AsyncSessionLocal
-from src.config import EMBEDDING_MODEL_NAME, QDRANT_HOST, COLLECTION_NAME, DEEPSEEK_API_KEY, LLM_MODEL
+from ...database.database import AsyncSessionLocal
+from ...config import EMBEDDING_MODEL_NAME, QDRANT_HOST, COLLECTION_NAME, DEEPSEEK_API_KEY, LLM_MODEL
 
 async def get_rag_service():
     """

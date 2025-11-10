@@ -4,9 +4,9 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import SearchParams
 from openai import AsyncOpenAI
-from database.database import AsyncSessionLocal
-from database.models import Document, DocumentChunk
-from config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
+from ..database.database import AsyncSessionLocal
+from ..database.models import Document, DocumentChunk
+from ..config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
 import logging
 
 # Настройка логирования

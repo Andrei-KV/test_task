@@ -1,6 +1,6 @@
-from src.services.redis_service import RedisService
-from src.services.context_manager import ContextManagerService
-from src.config import REDIS_HOST, REDIS_PORT
+from ...services.redis_service import RedisService
+from ...services.context_manager import ContextManagerService
+from ...config import REDIS_HOST, REDIS_PORT
 
 async def get_context_manager():
     """

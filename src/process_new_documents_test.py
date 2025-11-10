@@ -2,17 +2,17 @@ import time
 import schedule
 from sqlalchemy.orm import Session
 from sqlalchemy import select, inspect
-from database.database import SessionLocal, engine, init_db
-from database.models import Document
-from services import init_drive_service, list_files_in_folder, download_drive_file_content, get_drive_web_link
-from services import (
+from src.database.database import SessionLocal, engine, init_db
+from src.database.models import Document
+from src.services.google_drive import init_drive_service, list_files_in_folder, download_drive_file_content, get_drive_web_link
+from src.services.document_processor import (
     parse_docx, parse_doc, parse_rtf, parse_md, parse_txt,
     clean_text, split_text_into_chunks
 )
-from services import indexing_pipe_line
-from config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID
+from src.services.vectorization import indexing_pipe_line
+from src.config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID
 from uuid import uuid4
-from database.models import DocumentChunk
+from src.database.models import DocumentChunk
 import logging
 
 # Настройка логирования

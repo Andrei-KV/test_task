@@ -1,7 +1,7 @@
 import aioredis
 from typing import Optional, List
 import json
-from src.config import REDIS_HOST, REDIS_PORT
+from ..config import REDIS_HOST, REDIS_PORT
 
 class RedisService:
     """

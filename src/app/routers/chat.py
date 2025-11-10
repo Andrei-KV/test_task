@@ -2,8 +2,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from ..dependencies.websocket_manager import manager
 from ..dependencies.rag import get_rag_service
 from ..dependencies.context import get_context_manager
-from src.services.rag_service import RAGService
-from src.services.context_manager import ContextManagerService
+from ...services.rag_service import RAGService
+from ...services.context_manager import ContextManagerService
 
 router = APIRouter(tags=["chat"])
 
