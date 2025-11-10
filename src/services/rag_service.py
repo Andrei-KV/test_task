@@ -7,13 +7,9 @@ from openai import AsyncOpenAI
 from ..database.database import AsyncSessionLocal
 from ..database.models import Document, DocumentChunk
 from ..config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
-import logging
+from src.app.logging_config import get_logger
 
-# Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Variables check
@@ -114,7 +110,6 @@ class LLMGenerator:
     """Инкапсулирует клиента LLM, системный промпт и логику генерации."""
 
     def __init__(self, api_key: str, model_name: str):
-        # Клиент OpenAI инкапсулирован, API ключ не является глобальной переменной
         self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.__model_name = model_name
 
