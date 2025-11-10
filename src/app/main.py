@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from .routers import chat
 import uvicorn
+from . import logging_config
 
 app = FastAPI(title="RAG Chatbot")
 
