@@ -44,6 +44,24 @@ services:
       # Сохранение данных Qdrant (критично для сохранения векторов)
       - qdrant_data:/qdrant/storage
 
+  # ----------------------------------------------------------------
+  # 3. Redis Service (Кэш и хранилище сессий)
+  # ----------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: legal_rag_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   qdrant_data:
+  redis_data:
