@@ -1,11 +1,11 @@
-from sqlalchemy.orm import Session
+import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
 from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import SearchParams
-from openai import OpenAI
-from database.database import SessionLocal
+from openai import AsyncOpenAI
+from database.database import AsyncSessionLocal
 from database.models import Document, DocumentChunk
-from services.vectorization import EmbeddingService, QdrantClientWrapper
 from config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
 import logging
 
@@ -28,29 +28,30 @@ class QueryEmbeddingService:
         # Загрузка тяжелого ресурса (SentenceTransformer) один раз
         self.__model = SentenceTransformer(model_name)
 
-    def vectorize_query(self, query: str) -> list[float]:
+    async def vectorize_query(self, query: str) -> list[float]:
         """Векторизует один текстовый запрос для поиска."""
         logger.info("Vectorizing user query...")
-        query_embedding = self.__model.encode(
+        query_embedding = await asyncio.to_thread(
+            self.__model.encode,
             [query],
             normalize_embeddings=True,
             convert_to_tensor=False
-        ).tolist()[0]
+        )
         logger.info("User query vectorized successfully.")
-        return query_embedding
+        return query_embedding.tolist()[0]
     
 
 # Сервис семантического поиска
 class QueryQdrantClient:
     def __init__(self, host: str, collection_name: str):
         # Инкапсуляция клиента и конфигурации
-        self.__client = QdrantClient(url=host)
+        self.__client = AsyncQdrantClient(url=host)
         self.__collection_name = collection_name
 
-    def semantic_search(self, query_vector: list[float], limit_k: int = 10):
+    async def semantic_search(self, query_vector: list[float], limit_k: int = 10):
         """Выполняет семантический поиск в Qdrant."""
         logger.info("Performing semantic search in Qdrant...")
-        search_result = self.__client.query_points(
+        search_result = await self.__client.query_points(
             collection_name=self.__collection_name,
             query=query_vector,
             limit=limit_k,
@@ -59,15 +60,15 @@ class QueryQdrantClient:
                 exact=False,
                 hnsw_ef=100
             )
-        ).points
+        )
         logger.info("Semantic search completed.")
-        return search_result
+        return search_result.points
 
 # Извлечение контекста из БД PostgreSQL
 class ContextRetriever:
     """Инкапсулирует логику извлечения полного контекста из PostgreSQL."""
 
-    def retrieve_full_context(self, qdrant_results, session: Session) -> tuple:
+    async def retrieve_full_context(self, qdrant_results, session: AsyncSession) -> tuple:
         """Извлекает полный текстовый контекст по результатам Qdrant."""
         logger.info("Retrieving full context from PostgreSQL...")
     
@@ -84,7 +85,7 @@ class ContextRetriever:
         ]
         if not relevant_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
-            return " ", None
+            return " ", None, None
 
         from sqlalchemy import select
         stmt = (
@@ -93,11 +94,11 @@ class ContextRetriever:
            .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
            .order_by(DocumentChunk.chunk_id)
         )
-        sql_results = session.execute(stmt).fetchall()
+        sql_results = (await session.execute(stmt)).fetchall()
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None
+            return " ", None, None
 
         full_context = [result.content for result in sql_results]
         web_link = sql_results[0].web_link
@@ -112,14 +113,14 @@ class LLMGenerator:
 
     def __init__(self, api_key: str, model_name: str):
         # Клиент OpenAI инкапсулирован, API ключ не является глобальной переменной
-        self.__client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.__model_name = model_name
 
-    def generate_rag_response(self, context: str, user_query: str, system_instructions: str) -> str:
+    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
         try:
-            response = self.__client.chat.completions.create(
+            response = await self.__client.chat.completions.create(
                 model=self.__model_name,
                 messages=[
                 {"role": "system", "content": f"{system_instructions}--- **КОНТЕКСТ** ---{context}"},
@@ -183,7 +184,7 @@ class PromptManager:
 # ОРКЕСТРАТОР
 # =====================================================================
 
-class RAGPipelineOrchestrator:
+class RAGService:
     """Центральный класс, управляющий последовательностью операций RAG."""
 
     def __init__(self, embedder: QueryEmbeddingService, searcher: QueryQdrantClient, 
@@ -197,19 +198,19 @@ class RAGPipelineOrchestrator:
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
         self.__prompt_manager = prompt_manager # ✅ Сохраняем менеджер промптов
 
-    def run_pipeline(self, user_query: str) -> tuple[str, str | None]:
+    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None]:
         """Основной метод, выполняющий полный цикл RAG."""
         logger.info("Starting RAG pipeline...")
 
         # 1. Векторизация запроса
-        query_vector = self.__embedder.vectorize_query(user_query)
+        query_vector = await self.__embedder.vectorize_query(user_query)
         
         # 2. Семантический поиск
-        qdrant_results = self.__searcher.semantic_search(query_vector)
+        qdrant_results = await self.__searcher.semantic_search(query_vector)
 
         # 3. Извлечение контекста (управление транзакцией БД)
-        with self.__SessionLocal() as session:
-            context, web_link, top_document_id = self.__retriever.retrieve_full_context(qdrant_results, session)
+        async with self.__SessionLocal() as session:
+            context, web_link, top_document_id = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
@@ -225,37 +226,11 @@ class RAGPipelineOrchestrator:
         logger.info(f"💾 Контекст из базы: {size_bytes} байт, что составляет {size_mb:.4f} МБ.")
         
         # 5. Генерация ответа
-        final_answer = self.__generator.generate_rag_response(
+        final_answer = await self.__generator.generate_rag_response(
             context=context, 
             user_query=user_query,
-            system_instructions=final_system_instructions # Передаем выбранные инструкции
+            system_instructions=final_system_instructions,
+            low_precision=low_precision
         )
         logger.info("RAG pipeline finished successfully.")
         return final_answer, web_link
-
-
-# =====================================================================
-# КОМПОЗИЦИОННЫЙ КОРЕНЬ (Точка входа)
-# =====================================================================
-
-# 1. Инициализация всех зависимостей, используя конфигурацию
-QUERY_EMBEDDER = QueryEmbeddingService(model_name=EMBEDDING_MODEL_NAME)
-QUERY_SEARCHER = QueryQdrantClient(host=QDRANT_HOST, collection_name=COLLECTION_NAME)
-CONTEXT_RETRIEVER = ContextRetriever()
-LLM_GENERATOR = LLMGenerator(api_key=DEEPSEEK_API_KEY, model_name=LLM_MODEL)
-PROMPT_MANAGER = PromptManager()
-
-# 2. Создание главного оркестратора (Внедрение зависимостей)
-RAG_ORCHESTRATOR = RAGPipelineOrchestrator(
-    embedder=QUERY_EMBEDDER,
-    searcher=QUERY_SEARCHER,
-    retriever=CONTEXT_RETRIEVER,
-    generator=LLM_GENERATOR,
-    session_factory=SessionLocal,
-    prompt_manager=PROMPT_MANAGER
-)
-
-# 3. Публичная функция для использования в других модулях (например, в обработчике Telegram бота)
-def run_rag_pipeline(user_query: str) -> tuple[str, str | None]:
-    """Единственная публичная функция для запуска всего RAG-пайплайна."""
-    return RAG_ORCHESTRATOR.run_pipeline(user_query)
