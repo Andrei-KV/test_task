@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>DEWIAR AI</title>
+        <style>
+            body {
+                font-family: sans-serif;
+                background-color: #f5f5f5;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+            }
+            #chat-container {
+                width: 80%;
+                max-width: 800px;
+                height: 90vh;
+                display: flex;
+                flex-direction: column;
+                border: 1px solid #e0e0e0;
+                border-radius: 10px;
+                background-color: white;
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            }
+            #header {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 15px;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            #header img {
+                width: 32px;
+                height: 32px;
+                margin-right: 10px;
+            }
+            #messages {
+                flex-grow: 1;
+                padding: 20px;
+                overflow-y: auto;
+            }
+            .message {
+                margin-bottom: 15px;
+                display: flex;
+            }
+            .bot-message {
+                justify-content: flex-start;
+            }
+            .user-message {
+                justify-content: flex-end;
+            }
+            .message-content {
+                padding: 10px 15px;
+                border-radius: 20px;
+                max-width: 70%;
+            }
+            .bot-message .message-content {
+                background-color: #f1f0f0;
+            }
+            .user-message .message-content {
+                background-color: #dcf8c6;
+            }
+            #form {
+                display: flex;
+                padding: 20px;
+                border-top: 1px solid #e0e0e0;
+            }
+            #messageText {
+                flex-grow: 1;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 20px;
+                margin-right: 10px;
+            }
+            #form button {
+                padding: 10px 20px;
+                border: none;
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 50%;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="chat-container">
+            <div id="header">
+                <img src="https://dewiar.com/images/logo.svg" alt="DEWIAR AI">
+                <h2>DEWIAR AI</h2>
+            </div>
+            <ul id='messages'>
+                <li class="message bot-message">
+                    <div class="message-content">Здравствуйте, я AI-ассистент Китайско-Белорусского индустриального парка "Великий Камень". Спрашивайте, я отвечу на Ваши вопросы! 🚀</div>
+                </li>
+            </ul>
+            <form id="form" onsubmit="sendMessage(event)">
+                <input type="text" id="messageText" autocomplete="off" placeholder="Введите запрос"/>
+                <button>→</button>
+            </form>
+        </div>
+        <script>
+            var ws = new WebSocket("ws://localhost:8000/ws");
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                message.className = 'message bot-message';
+                var content = document.createElement('div');
+                content.className = 'message-content';
+                content.innerHTML = event.data;
+                message.appendChild(content);
+                messages.appendChild(message);
+            };
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                message.className = 'message user-message';
+                var content = document.createElement('div');
+                content.className = 'message-content';
+                content.innerHTML = input.value;
+                message.appendChild(content);
+                messages.appendChild(message);
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
+            }
+        </script>
+    </body>
+</html>
