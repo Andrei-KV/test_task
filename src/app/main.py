@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from .routers import chat
+import uvicorn
 
 app = FastAPI(title="RAG Chatbot")
 
@@ -23,3 +24,6 @@ async def get(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 app.include_router(chat.router, prefix="/api/v1")
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

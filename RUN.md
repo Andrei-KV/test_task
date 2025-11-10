@@ -62,7 +62,7 @@ You can check the status of the containers with `docker-compose ps`.
 Once the backend services are running, you can start the main FastAPI application. The server should be run from the project root using Poetry to ensure it uses the correct virtual environment.
 
 ```bash
-poetry run uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
+poetry run python src/app/main.py
 ```
 
 - `--reload`: This flag enables hot-reloading, which is useful for development as the server will automatically restart after code changes.
