@@ -100,7 +100,8 @@
             </form>
         </div>
         <script>
-            var ws = new WebSocket("ws://localhost:8000/ws");
+            var client_id = Date.now()
+            var ws = new WebSocket(`ws://localhost:8000/api/v1/ws/${client_id}`);
             ws.onmessage = function(event) {
                 var messages = document.getElementById('messages')
                 var message = document.createElement('li')
