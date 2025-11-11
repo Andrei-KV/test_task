@@ -7,7 +7,7 @@ from ...services.rag_service import (
     RAGService,
 )
 from ...database.database import AsyncSessionLocal
-from ...config import EMBEDDING_MODEL_NAME, QDRANT_HOST, COLLECTION_NAME, DEEPSEEK_API_KEY, LLM_MODEL
+from ...config import EMBEDDING_MODEL_NAME, QDRANT_HOST, COLLECTION_NAME, DEEPSEEK_API_KEY, LLM_MODEL, GEMINI_API_KEY
 
 async def get_rag_service():
     """
@@ -17,7 +17,10 @@ async def get_rag_service():
     embedder = QueryEmbeddingService(model_name=EMBEDDING_MODEL_NAME)
     searcher = QueryQdrantClient(host=QDRANT_HOST, collection_name=COLLECTION_NAME)
     retriever = ContextRetriever()
-    generator = LLMGenerator(api_key=DEEPSEEK_API_KEY, model_name=LLM_MODEL)
+    if LLM_MODEL == "deepseek-chat":
+        generator = LLMGenerator(api_key=DEEPSEEK_API_KEY, model_name=LLM_MODEL)
+    else:
+        generator = LLMGenerator(api_key=GEMINI_API_KEY, model_name=LLM_MODEL)
     prompt_manager = PromptManager()
 
     rag_service = RAGService(

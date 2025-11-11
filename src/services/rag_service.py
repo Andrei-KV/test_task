@@ -9,6 +9,8 @@ from ..database.database import AsyncSessionLocal
 from ..database.models import Document, DocumentChunk
 from ..config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
 from src.app.logging_config import get_logger
+from google import genai
+from google.genai.types import GenerateContentConfig
 
 logger = get_logger(__name__)
 
@@ -112,7 +114,12 @@ class LLMGenerator:
     """Инкапсулирует клиента LLM, системный промпт и логику генерации."""
 
     def __init__(self, api_key: str, model_name: str):
-        self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        self.__model_name = model_name
+        if self.__model_name == "deepseek-chat":
+            self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        else:
+            self.__client = genai.Client(api_key=api_key)
+        
         self.__model_name = model_name
 
     async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, low_precision: bool = False) -> str:
@@ -130,22 +137,45 @@ class LLMGenerator:
         )
 
         try:
-            response = await self.__client.chat.completions.create(
-                model=self.__model_name,
-                messages=[
-                    {"role": "system", "content": final_system_prompt},
-                    {"role": "user", "content": user_query},
-                ],
-                stream=False,
-                temperature=temperature,
-                top_p=0.8,
-                max_tokens=1000,
-            )
-            if not response:
-                logger.error("Error generating response: No response object.")
-                return 'Ошибка генерации ответа'
+            if self.__model_name == "deepseek-chat":
+                response = await self.__client.chat.completions.create(
+                    model=self.__model_name,
+                    messages=[
+                        {"role": "system", "content": final_system_prompt},
+                        {"role": "user", "content": user_query},
+                    ],
+                    stream=False,
+                    temperature=temperature,
+                    top_p=0.8,
+                    max_tokens=1000,
+                )
+                if not response:
+                    logger.error("Error generating response: No response object.")
+                    return 'Ошибка генерации ответа'
+                result_content = response.choices[0].message.content
+
+            else:
+                config = GenerateContentConfig(
+                    temperature=temperature,
+                    top_p=0.8,
+                    max_output_tokens=1000,
+                    system_instruction=final_system_prompt, # Системный промпт отдельно
+                )
+
+                response = await self.__client.aio.models.generate_content(
+                    model=self.__model_name,
+                    contents=user_query, # Запрос пользователя 
+                    config=config
+                )
+                
+                result_content = response.text
+
+                if not response:
+                    logger.error("Error generating response: No response object.")
+                    return 'Ошибка генерации ответа'
             logger.info(f"RAG response generated successfully: {response}")
-            return response.choices[0].message.content
+            return result_content
+            
         except Exception as e:
             logger.error(f"An unexpected error occurred during generation: {e}")
             return f"❌ Произошла непредвиденная ошибка при генерации."
