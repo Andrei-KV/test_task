@@ -13,7 +13,7 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
 
-    async def send_personal_message(self, text: str, websocket: WebSocket, web_link: Optional[str] = None):
+    async def send_personal_message(self, text: str, websocket: WebSocket, web_link: Optional[str] = None,  title: Optional[str] = None):
         """
         Отправляет персональное сообщение.
         Если web_link предоставлен, отправляет JSON.
@@ -22,7 +22,8 @@ class ConnectionManager:
         if web_link:
             payload = {
                 "text": text,
-                "web_link": web_link
+                "web_link": web_link,
+                'title': title
             }
             await websocket.send_json(payload)
         else:

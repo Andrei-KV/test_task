@@ -133,3 +133,23 @@ body {
     font-size: 24px;
     flex-shrink: 0;
 }
+
+/* Source Button */
+.source-button {
+    display: inline-block;
+    background-color: #f0f0f0;
+    color: #333;
+    padding: 8px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    margin-top: 10px;
+    max-width: 200px; /* Fixed width */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid #ccc;
+}
+
+.source-button:hover {
+    background-color: #e0e0e0;
+}

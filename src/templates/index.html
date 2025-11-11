@@ -51,6 +51,21 @@
                     // Если есть текст, обрабатываем его как Markdown
                     content.innerHTML = marked.parse(data.text);
                 }
+                 // Проверяем наличие web_link и добавляем кнопку
+                 if (data.web_link && data.title) {
+                    var linkButton = document.createElement('a');
+                    linkButton.href = data.web_link;
+                    linkButton.className = 'source-button';
+                    linkButton.target = '_blank'; // Открывать в новой вкладке
+                    
+                    var buttonText = document.createElement('span');
+                    buttonText.textContent = data.title;
+                    linkButton.appendChild(buttonText);
+                    
+                    linkButton.title = data.title; // Для всплывающей подсказки
+
+                    content.appendChild(linkButton);
+                }
             } catch (e) {
                 // Если не JSON, вставляем как обычный текст
                 content.innerHTML = event.data;
