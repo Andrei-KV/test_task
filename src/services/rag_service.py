@@ -9,8 +9,6 @@ from ..database.database import AsyncSessionLocal
 from ..database.models import Document, DocumentChunk
 from ..config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, EMBEDDING_MODEL_NAME
 from src.app.logging_config import get_logger
-from google import genai
-from google.genai.types import GenerateContentConfig
 
 logger = get_logger(__name__)
 
@@ -47,7 +45,7 @@ class QueryQdrantClient:
         self.__client = AsyncQdrantClient(url=host)
         self.__collection_name = collection_name
 
-    async def semantic_search(self, query_vector: list[float], limit_k: int = 10):
+    async def semantic_search(self, query_vector: list[float], limit_k: int = 4):
         """Выполняет семантический поиск в Qdrant."""
         logger.info("Performing semantic search in Qdrant...")
         search_result = await self.__client.query_points(
@@ -76,7 +74,7 @@ class ContextRetriever:
             top_document_id = qdrant_results[0].payload.get('document_id')
         except (IndexError, KeyError):
             logger.warning("No document ID found in Qdrant results.")
-            return " ", None, None, None, 0.0
+            return " ", None, None, None, 0.0, []
 
         relevant_chunk_ids = [
             result.payload.get('chunk_id')
@@ -85,11 +83,11 @@ class ContextRetriever:
         ]
         if not relevant_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
-            return " ", None, None, None, 0.0
+            return " ", None, None, None, 0.0, []
 
         from sqlalchemy import select
         stmt = (
-            select(DocumentChunk.content, Document.web_link, Document.title)
+            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number)
            .join(Document)
            .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
            .order_by(DocumentChunk.chunk_id)
@@ -98,84 +96,65 @@ class ContextRetriever:
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None, None, None, 0.0
+            return " ", None, None, None, 0.0, []
 
         full_context = [result.content for result in sql_results]
+        page_numbers = [result.page_number for result in sql_results]
         web_link = sql_results[0].web_link
         title = sql_results[0].title
         context = "\n\n".join(full_context)
         max_score = max([result.score for result in qdrant_results])
         logger.info("Full context retrieved successfully.")
         logger.debug(context[:500])
-        return context, web_link, title, top_document_id, max_score
+        return context, web_link, title, top_document_id, max_score, page_numbers
 
 
 class LLMGenerator:
     """Инкапсулирует клиента LLM, системный промпт и логику генерации."""
 
     def __init__(self, api_key: str, model_name: str):
-        self.__model_name = model_name
-        if self.__model_name == "deepseek-chat":
-            self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-        else:
-            self.__client = genai.Client(api_key=api_key)
-        
+        self.__client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.__model_name = model_name
 
-    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, low_precision: bool = False) -> str:
+    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: list[int], low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
         # temperature = 0.6 if low_precision else 0.1
         temperature = 0
 
+        # page_numbers may have duplicates, so we use a set to get unique page numbers
+        unique_page_numbers = sorted(list(set(filter(None, page_numbers)))) if page_numbers else []
+        
+        # Format the page numbers into a string
+        pages_str = ", ".join(map(str, unique_page_numbers))
+
         # Формируем финальный системный промпт с информацией о документе
         final_system_prompt = (
-            f"{system_instructions.format(web_link=web_link)}\n\n"
+            f"{system_instructions.format(web_link=web_link, pages_str=pages_str)}\n\n"
             f"**Название документа:** {title}\n"
-            f"**Веб-ссылка на документ:** {web_link}\n\n"
-            f"<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
+            f"**Веб-ссылка на документ:** {web_link}\n"
         )
+        if pages_str:
+            final_system_prompt += f"**Страницы:** {pages_str}\n\n"
+        final_system_prompt += f"<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
 
         try:
-            if self.__model_name == "deepseek-chat":
-                response = await self.__client.chat.completions.create(
-                    model=self.__model_name,
-                    messages=[
-                        {"role": "system", "content": final_system_prompt},
-                        {"role": "user", "content": user_query},
-                    ],
-                    stream=False,
-                    temperature=temperature,
-                    top_p=0.8,
-                    max_tokens=1000,
-                )
-                if not response:
-                    logger.error("Error generating response: No response object.")
-                    return 'Ошибка генерации ответа'
-                result_content = response.choices[0].message.content
-
-            else:
-                config = GenerateContentConfig(
-                    temperature=temperature,
-                    top_p=0.8,
-                    max_output_tokens=1000,
-                    system_instruction=final_system_prompt, # Системный промпт отдельно
-                )
-
-                response = await self.__client.aio.models.generate_content(
-                    model=self.__model_name,
-                    contents=user_query, # Запрос пользователя 
-                    config=config
-                )
-                
-                result_content = response.text
-
-                if not response:
-                    logger.error("Error generating response: No response object.")
-                    return 'Ошибка генерации ответа'
+            response = await self.__client.chat.completions.create(
+                model=self.__model_name,
+                messages=[
+                    {"role": "system", "content": final_system_prompt},
+                    {"role": "user", "content": user_query},
+                ],
+                stream=False,
+                temperature=temperature,
+                top_p=0.8,
+                max_tokens=1000,
+            )
+            if not response:
+                logger.error("Error generating response: No response object.")
+                return 'Ошибка генерации ответа'
             logger.info(f"RAG response generated successfully: {response}")
-            return result_content
-            
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(f"An unexpected error occurred during generation: {e}")
             return f"❌ Произошла непредвиденная ошибка при генерации."
@@ -191,7 +170,7 @@ class PromptManager:
             "РОЛЬ И ОСНОВНОЕ НАЗНАЧЕНИЕ:\n"
             "Ты — высококвалифицированный **Технический Аналитик и Эксперт по Нормативной Документации**.\n"
             "Твоя единственная задача — **анализировать предоставленный КОНТЕКСТ** и генерировать максимально точные, структурированные и легко читаемые ответы."
-            "Ответ должен быть кратким. Главное -- это **передать ссылку на документ и на пункты документа**\n\n"
+            "Ответ должен быть кратким. Главное -- это передать ссылку на документ и на пункты документа\n\n"
             "### ПРАВИЛА RAG (АНТИ-ГАЛЛЮЦИНАЦИИ):\n"
             "1.  **ИСКЛЮЧИТЕЛЬНО КОНТЕКСТ:** Твой ответ должен быть основан **ТОЛЬКО** на информации, содержащейся в блоке `<КОНТЕКСТ>...</КОНТЕКСТ>`.\n"
             "2.  **Запрет на Внешние Знания:** Тебе **строго запрещено** использовать любые знания, полученные в ходе обучения, или делать предположения.\n"
@@ -208,11 +187,13 @@ class PromptManager:
             "5.  **Атрибуция (Источники):** В самом конце ответа, после горизонтальной черты (`---`), создай секцию под заголовком `### Использованные Источники`.\n"
             "    * Сначала перечисли все **части документа** (`Пункт 1`, `Глава 2` и т.д.), которые были использованы для формирования ответа.\n"
             "    * В конце этой секции добавь **веб-ссылку** на полный документ.\n\n"
-             "### КОНТРОЛЬ ДЛИНЫ И ПОЛНОТЫ ОТВЕТА:"
+            "6. Сокращение Вводных Фраз: Исключитm фразы типа 'Отличный вопрос. Это фундаментальное понятие...'. Система-промпт  'Эксперт', подразумевает, что модель сразу переходит к фактам."
+            "### КОНТРОЛЬ ДЛИНЫ И ПОЛНОТЫ ОТВЕТА:"
                 "1.  **Приоритет завершения:** Ответ должен быть **полностью завершен** и логически окончен. При приближении к лимиту токенов, модель должна **уплотнять информацию** и завершать текущую мысль."
                 "2.  **Экономия токенов:** Избегай излишних вводных фраз, приветствий и развернутых предложений. Используй краткий, технический стиль, максимально используя **списки и выделение** для экономии токенов."
                 "3.  **Максимальная длина:** Твой полный ответ (включая все заголовки и источники) **не должен превышать 800 токенов**, чтобы гарантировать завершение."
             "### ПРИМЕР ЖЕЛАЕМОГО ФОРМАТА:\n"
+            "```markdown\n"
             "### Основные Требования к Экранированию Кабелей\n"
             "Изоляция кабеля должна выдерживать рабочее напряжение, и для кабелей выше **3 кВ** обязательно требуется заземленный экран.\n\n"
             "---\n\n"
@@ -221,8 +202,9 @@ class PromptManager:
             "2.  **Материал:** Экран должен быть выполнен из **медного** или **алюминиевого** проводника.\n\n"
             "---\n\n"
             "### Использованные Источники:\n"
-            "* **Части документа:** Секция 2.1.3, Параграф 5.2.14, Глава 7, стр. 15.\n"
+            "* **Части документа:** Секция 2.1.3, Параграф 5.2.14, Глава 7, стр. {pages_str}.\n"
             "* **Веб-ссылка:** [Название документа]({web_link})\n"
+            "```"
         ),
         # Добавить другие ID документов и соответствующие инструкции
     }
@@ -271,7 +253,7 @@ class RAGService:
 
         # 3. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, title, top_document_id, score = await self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, title, top_document_id, score, page_numbers = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
@@ -284,8 +266,8 @@ class RAGService:
         # 4. Логика измерения и обрезки контекста
         tokenizer = tiktoken.get_encoding("cl100k_base")
         tokens = tokenizer.encode(context)
-        # if len(tokens) > 400:
-        #     context = tokenizer.decode(tokens[:400])
+        if len(tokens) > 400:
+            context = tokenizer.decode(tokens[:400])
         
         size_bytes = len(context.encode('utf-8'))
         size_mb = size_bytes / (1024 * 1024)
@@ -298,7 +280,8 @@ class RAGService:
             system_instructions=final_system_instructions,
             low_precision=low_precision,
             title=title,
-            web_link=web_link
+            web_link=web_link,
+            page_numbers=page_numbers
         )
         logger.info("RAG pipeline finished successfully.")
-        return final_answer, web_link, score, title
+        return final_answer, web_link, score

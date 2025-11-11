@@ -15,6 +15,7 @@ from src.services.document_processor import (
     parse_doc,
     parse_docx,
     parse_md,
+    parse_pdf,
     parse_rtf,
     parse_txt,
     split_text_into_chunks,
@@ -105,39 +106,47 @@ async def process_new_documents():
             if raw_content_bytes is None:
                 continue
 
+            pages = []
             if (
                 file_mime_type
                 == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ):
-                text_content = parse_docx(raw_content_bytes)
+                pages = parse_docx(raw_content_bytes)
+            elif file_mime_type == "application/pdf":
+                pages = parse_pdf(raw_content_bytes)
             elif file_mime_type == "application/msword":
-                text_content = parse_doc(raw_content_bytes)
+                pages = parse_doc(raw_content_bytes)
             elif file_mime_type == "application/rtf":
-                text_content = parse_rtf(raw_content_bytes)
+                pages = parse_rtf(raw_content_bytes)
             elif file_mime_type == "text/markdown":
-                text_content = parse_md(raw_content_bytes.decode("utf-8"))
+                pages = parse_md(raw_content_bytes.decode("utf-8"))
             elif file_mime_type == "text/plain":
-                text_content = parse_txt(raw_content_bytes.decode("utf-8"))
+                pages = parse_txt(raw_content_bytes.decode("utf-8"))
             else:
                 logger.warning(f"Unsupported file format: {file_mime_type}")
-
                 continue
 
-            logger.info(f"Parsed content from file: {file_name}")
-            cleaned_content = clean_text(text_content)
-            chunks = split_text_into_chunks(cleaned_content)
-            logger.info(f"Split content into {len(chunks)} chunks.")
+            # Dynamic chunk size logic
+            total_text_length = sum(len(page[0]) for page in pages)
+            chunk_size = 500  # Default chunk size
+            if total_text_length / chunk_size > 800:
+                chunk_size = total_text_length // 800 + 1
+                logger.info(f"Document {file_name} is large. Adjusting chunk size to {chunk_size}")
 
             chunk_objects_to_process = []
-            for chunk in chunks:
-                qdrant_uuid = str(uuid4())
-                new_document_chunk = DocumentChunk(
-                    document_id=document_id,
-                    content=chunk,
-                    qdrant_id=qdrant_uuid,
-                )
-                session.add(new_document_chunk)
-                chunk_objects_to_process.append(new_document_chunk)
+            for page_content, page_num in pages:
+                cleaned_content = clean_text(page_content)
+                chunks = split_text_into_chunks(cleaned_content, chunk_size=chunk_size)
+                for chunk in chunks:
+                    qdrant_uuid = str(uuid4())
+                    new_document_chunk = DocumentChunk(
+                        document_id=document_id,
+                        content=chunk,
+                        page_number=page_num,
+                        qdrant_id=qdrant_uuid,
+                    )
+                    session.add(new_document_chunk)
+                    chunk_objects_to_process.append(new_document_chunk)
             await session.commit()
             logger.info("Committed new chunks to the database.")
             indexing_pipe_line.run(chunk_objects_to_process)
