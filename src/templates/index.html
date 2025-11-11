@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>RAG_BOT_DEMO</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,7 +43,19 @@
             message.className = 'message bot-message';
             var content = document.createElement('div');
             content.className = 'message-content';
-            content.innerHTML = event.data;
+
+            try {
+                // Пытаемся распарсить JSON
+                const data = JSON.parse(event.data);
+                if (data.text) {
+                    // Если есть текст, обрабатываем его как Markdown
+                    content.innerHTML = marked.parse(data.text);
+                }
+            } catch (e) {
+                // Если не JSON, вставляем как обычный текст
+                content.innerHTML = event.data;
+            }
+
             message.appendChild(content);
             messages.appendChild(message);
             messages.scrollTop = messages.scrollHeight; // Auto-scroll

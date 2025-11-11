@@ -20,7 +20,8 @@ async def websocket_endpoint(
     # Send history to user on connect
     history = await context_manager.get_full_history(client_id)
     for message in history:
-        await manager.send_personal_message(f"{message['role']}: {message['content']}", websocket)
+        await manager.send_personal_message(text=f"{message['role']}: {message['content']}", websocket=websocket)
+
 
     try:
         while True:
@@ -28,7 +29,7 @@ async def websocket_endpoint(
             await context_manager.add_message(client_id, "user", data)
             
             # Send "Processing..." message
-            await manager.send_personal_message("Идёт обработка...", websocket)
+            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket)
 
             context_window = await context_manager.get_context_window(client_id)
             context_query = " ".join([msg["content"] for msg in context_window])
@@ -38,21 +39,21 @@ async def websocket_endpoint(
 
             if score < 0.7:
                 clarification_count = await context_manager.get_clarification_count(client_id)
-                if clarification_count < 3:
+                if clarification_count < 2:
                     await context_manager.increment_clarification_count(client_id)
                     clarification_question = "Не могли бы вы уточнить вопрос?"
                     await context_manager.add_message(client_id, "bot", clarification_question)
-                    await manager.send_personal_message(clarification_question, websocket)
+                    await manager.send_personal_message(text=clarification_question, websocket=websocket)
                 else:
                     await context_manager.reset_context(client_id)
                     answer, web_link, score = await rag_service.aquery(data, low_precision=True)
-                    warning = "Точность ответа может быть низкой. Пожалуйста, попробуйте переформулировать вопрос."
+                    warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
                     final_answer = f"{warning}\n\n{answer}"
                     await context_manager.add_message(client_id, "bot", final_answer)
-                    await manager.send_personal_message(final_answer, websocket)
+                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link)
             else:
                 await context_manager.add_message(client_id, "bot", answer)
-                await manager.send_personal_message(answer, websocket)
+                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

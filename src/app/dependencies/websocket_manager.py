@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Optional
 from fastapi import WebSocket
+
 
 class ConnectionManager:
     def __init__(self):
@@ -12,7 +13,20 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
 
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
+    async def send_personal_message(self, text: str, websocket: WebSocket, web_link: Optional[str] = None):
+        """
+        Отправляет персональное сообщение.
+        Если web_link предоставлен, отправляет JSON.
+        В противном случае, отправляет обычный текст.
+        """
+        if web_link:
+            payload = {
+                "text": text,
+                "web_link": web_link
+            }
+            await websocket.send_json(payload)
+        else:
+            await websocket.send_text(text)
+
 
 manager = ConnectionManager()
