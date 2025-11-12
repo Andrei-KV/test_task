@@ -18,7 +18,7 @@ class Document(Base):
     drive_file_id: Mapped[str] = mapped_column(String(255), unique=True)
     web_link: Mapped[str] = mapped_column(String)
     load_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document")
+    chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
