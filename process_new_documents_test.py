@@ -15,6 +15,8 @@ from src.services.document_processor import (
     parse_doc,
     parse_docx,
     parse_md,
+    parse_excel,
+    parse_image,
     parse_pdf,
     parse_rtf,
     parse_txt,
@@ -79,6 +81,7 @@ async def process_new_documents():
             # Check doc in database
             if file_id in existing_ids_set:
                 # Документ уже проиндексирован, пропускаем
+                logger.info(f"Document: {file_name} had indexing befor")
                 continue
 
             logger.info(f"Processing new document: {file_name}")
@@ -122,21 +125,24 @@ async def process_new_documents():
                 pages = parse_md(raw_content_bytes.decode("utf-8"))
             elif file_mime_type == "text/plain":
                 pages = parse_txt(raw_content_bytes.decode("utf-8"))
+            elif (
+                file_mime_type
+                == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                or file_mime_type == "application/vnd.ms-excel"
+            ):
+                pages = parse_excel(raw_content_bytes)
+            elif file_mime_type.startswith("image/"):
+                pages = parse_image(raw_content_bytes)
             else:
                 logger.warning(f"Unsupported file format: {file_mime_type}")
                 continue
 
-            # Dynamic chunk size logic
-            total_text_length = sum(len(page[0]) for page in pages)
-            chunk_size = 500  # Default chunk size
-            if total_text_length / chunk_size > 800:
-                chunk_size = total_text_length // 800 + 1
-                logger.info(f"Document {file_name} is large. Adjusting chunk size to {chunk_size}")
-
             chunk_objects_to_process = []
             for page_content, page_num in pages:
                 cleaned_content = clean_text(page_content)
-                chunks = split_text_into_chunks(cleaned_content, chunk_size=chunk_size)
+                chunks = split_text_into_chunks(
+                    cleaned_content, chunk_size=200, overlap=40
+                )
                 for chunk in chunks:
                     qdrant_uuid = str(uuid4())
                     new_document_chunk = DocumentChunk(

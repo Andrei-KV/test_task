@@ -6,8 +6,11 @@ import nltk
 from docx2python import docx2python
 from io import BytesIO
 import fitz  # PyMuPDF
+import pandas as pd
 import pytesseract
+import tiktoken
 from PIL import Image
+
 
 def parse_pdf(content: bytes) -> list[tuple[str, int]]:
     """Parses a .pdf file and returns its text content, including OCR for images."""
@@ -74,9 +77,31 @@ def parse_md(content: str) -> list[tuple[str, int | None]]:
     
     return [(text_content, None)]
 
+def parse_excel(content: bytes) -> list[tuple[str, int | None]]:
+    """Parses an Excel file (.xls, .xlsx) and returns its text content."""
+    xls = pd.ExcelFile(BytesIO(content))
+    full_text = ""
+    for sheet_name in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet_name)
+        full_text += df.to_string()
+    return [(full_text, None)]
+
+
+def parse_image(content: bytes) -> list[tuple[str, int | None]]:
+    """Parses an image file and returns its text content using OCR."""
+    try:
+        image = Image.open(BytesIO(content))
+        ocr_text = pytesseract.image_to_string(image, lang="rus")
+        return [(ocr_text, None)]
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return []
+
+
 def parse_txt(content: str) -> list[tuple[str, int | None]]:
     """Parses a .txt file and returns its text content."""
     return [(content, None)]
+
 
 def clean_text(text: str) -> str:
     """Cleans the text by removing HTML/Markdown artifacts and normalizing whitespace."""
@@ -85,38 +110,79 @@ def clean_text(text: str) -> str:
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     return cleaned_text
 
-def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    """Splits the text into chunks of a specified size, respecting sentence boundaries."""
-    sentences = nltk.sent_tokenize(text, language='russian')
-    
-    chunks = []
-    current_chunk = ""
-    
-    for sentence in sentences:
-        # If adding the new sentence doesn't exceed the chunk size, add it
-        if len(current_chunk) + len(sentence) <= chunk_size:
-            current_chunk += " " + sentence
-        else:
-            # If the current chunk is not empty, add it to the list
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            
-            # Start a new chunk with the current sentence. If the sentence itself
-            # is larger than chunk_size, it will be in a chunk by itself.
-            current_chunk = sentence
+def split_text_into_chunks(
+    text: str, chunk_size: int = 200, overlap: int = 40
+) -> list[str]:
+    """
+    Splits the text into chunks of a specified token size with overlap, using a hierarchical approach.
+    The text is first split by paragraphs. If a paragraph is larger than the chunk size,
+    it is further split by sentences.
+    """
+    if not text:
+        return []
 
-    # Add the last remaining chunk
-    if current_chunk:
-        chunks.append(current_chunk.strip())
+    # Initialize tokenizer
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+
+    # Split text into paragraphs
+    paragraphs = text.split("\n\n")
+
+    chunks = []
+    for paragraph in paragraphs:
+        # Encode paragraph to tokens
+        paragraph_tokens = tokenizer.encode(paragraph)
         
-    # Handle overlap - this is a simplified approach. A more robust solution
-    # might involve adding sentences from the next chunk to the end of the current one.
+        # If paragraph is within chunk size, treat it as a whole chunk
+        if len(paragraph_tokens) <= chunk_size:
+            if paragraph.strip():
+                chunks.append(paragraph)
+        else:
+            # If paragraph is too long, split it by sentences
+            sentences = nltk.sent_tokenize(paragraph, language="russian")
+            current_chunk_tokens = []
+            
+            for sentence in sentences:
+                sentence_tokens = tokenizer.encode(sentence)
+                
+                # If adding the new sentence exceeds the chunk size, process the current chunk
+                if len(current_chunk_tokens) + len(sentence_tokens) > chunk_size:
+                    if current_chunk_tokens:
+                        # Decode tokens to string and add to chunks
+                        chunk_text = tokenizer.decode(current_chunk_tokens).strip()
+                        if chunk_text:
+                            chunks.append(chunk_text)
+                        
+                        # Start a new chunk with an overlap
+                        current_chunk_tokens = current_chunk_tokens[-overlap:]
+                    else:
+                        # Handle cases where a single sentence is longer than the chunk size
+                        current_chunk_tokens = sentence_tokens
+                
+                current_chunk_tokens.extend(sentence_tokens)
+
+            # Add the last remaining chunk
+            if current_chunk_tokens:
+                chunk_text = tokenizer.decode(current_chunk_tokens).strip()
+                if chunk_text:
+                    chunks.append(chunk_text)
+
+    # Apply overlap to the final list of chunks
     if overlap > 0 and len(chunks) > 1:
         overlapped_chunks = [chunks[0]]
         for i in range(1, len(chunks)):
-            # Get the last `overlap` characters from the previous chunk
-            prev_chunk_overlap = chunks[i-1][-overlap:]
-            overlapped_chunks.append(prev_chunk_overlap + chunks[i])
+            # Get the tokens for the previous and current chunks
+            prev_chunk_tokens = tokenizer.encode(chunks[i - 1])
+            current_chunk_tokens = tokenizer.encode(chunks[i])
+            
+            # Create overlap
+            overlap_tokens = prev_chunk_tokens[-overlap:]
+            
+            # Combine overlap with the current chunk
+            overlapped_chunk_tokens = overlap_tokens + current_chunk_tokens
+            
+            # Decode back to string
+            overlapped_chunks.append(tokenizer.decode(overlapped_chunk_tokens))
+            
         return overlapped_chunks
-    
+
     return chunks
