@@ -51,9 +51,13 @@ async def websocket_endpoint(
                     final_answer = f"{warning}\n\n{answer}"
                     await context_manager.add_message(client_id, "bot", final_answer)
                     await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title)
+                    #  Reset context after providing a low-precision answer
+                    await context_manager.reset_context(client_id)
             else:
                 await context_manager.add_message(client_id, "bot", answer)
                 await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title)
+                # Reset context after a successful answer
+                await context_manager.reset_context(client_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

@@ -10,7 +10,10 @@ import pandas as pd
 import pytesseract
 import tiktoken
 from PIL import Image
-
+from src.app.logging_config import get_logger
+import tempfile
+import os
+logger = get_logger(__name__)
 
 def parse_pdf(content: bytes) -> list[tuple[str, int]]:
     """Parses a .pdf file and returns its text content, including OCR for images."""
@@ -19,24 +22,52 @@ def parse_pdf(content: bytes) -> list[tuple[str, int]]:
 
     for page_num in range(len(pdf_document)):
         page = pdf_document.load_page(page_num)
+        # Extract text
         page_text = page.get_text("text")
 
-        # OCR for images
+        # Check for images and extract text using OCR
         image_list = page.get_images(full=True)
-        for img_index, img in enumerate(image_list):
-            xref = img[0]
-            base_image = pdf_document.extract_image(xref)
-            image_bytes = base_image["image"]
-            
-            try:
-                image = Image.open(BytesIO(image_bytes))
-                ocr_text = pytesseract.image_to_string(image, lang='rus')
-                page_text += "\n" + ocr_text
-            except Exception as e:
-                print(f"Error processing image on page {page_num + 1}: {e}")
-    
-        text_by_page.append((page_text, page_num + 1))
+        if image_list:
+            logger.info(f"Found {len(image_list)} images on page {page_num + 1}")
+                            
+            for img_index, img in enumerate(image_list):
+                try:
+                    xref = img[0]
+                    pix = fitz.Pixmap(pdf_document, xref)
+                                    
+                    # Check if image is valid for OCR
+                    if pix.n - pix.alpha < 4:  # GRAY or RGB
+                        # Save image to temporary file for OCR processing
+                        temp_dir = tempfile.gettempdir()
+                        temp_img_path = os.path.join(temp_dir, f"pdf_image_{page_num}_{img_index}.png")
+                        pix.save(temp_img_path)
+                        
+                        # Extract text using OCR
+                        ocr_text = pytesseract.image_to_string(temp_img_path, lang='rus')
+                        if ocr_text and len(ocr_text.strip()) > 10:  # Only add if meaningful text
+                            page_text += "\n" + ocr_text
+                            logger.info(f"OCR extracted {len(ocr_text)} characters from image on page {page_num + 1}")
+                        else:
+                            logger.debug(f"OCR returned insufficient text from image on page {page_num + 1}")
+                        
+                        # Clean up temporary file
+                        try:
+                            os.remove(temp_img_path)
+                        except:
+                            pass
+                    
+                    pix = None
+
+                except Exception as e:
+                    logger.info(f"Error processing image on page {page_num + 1}: {e}")
+                    pix = None
+                finally:
+                        # Гарантирует, что файл не останется, даже если была ошибка.
+                        if os.path.exists(temp_img_path):
+                            os.remove(temp_img_path)
         
+            text_by_page.append((page_text, page_num + 1))
+
     return text_by_page
 
 def parse_docx(content) -> list[tuple[str, int]]:
@@ -108,10 +139,11 @@ def clean_text(text: str) -> str:
     cleaned_text = re.sub(r'<[^>]+>', ' ', text)
     cleaned_text = re.sub(r'&[a-z]+;|&#x?[0-9a-f]+;', ' ', cleaned_text)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    cleaned_text = re.sub(r'\n+', ' ', cleaned_text).strip()
     return cleaned_text
 
 def split_text_into_chunks(
-    text: str, chunk_size: int = 200, overlap: int = 40
+    text: str, chunk_size: int = 200, overlap: int = 50
 ) -> list[str]:
     """
     Splits the text into chunks of a specified token size with overlap, using a hierarchical approach.
@@ -120,12 +152,16 @@ def split_text_into_chunks(
     """
     if not text:
         return []
-
+  
     # Initialize tokenizer
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
     # Split text into paragraphs
-    paragraphs = text.split("\n\n")
+    pattern = r'\n\s*\n+'
+    paragraphs = re.split(pattern, text)
+    logger.info('paragraphs[:7]', paragraphs)
+    # Удаляем пустые элементы, которые могут появиться из-за пробелов в начале/конце файла
+    paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
     chunks = []
     for paragraph in paragraphs:

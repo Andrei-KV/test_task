@@ -270,7 +270,7 @@ class RAGService:
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
         self.__prompt_manager = prompt_manager # ✅ Сохраняем менеджер промптов
 
-    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None, float]:
+    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None, float, str, list[int] | None]:
         """Основной метод, выполняющий полный цикл RAG."""
         logger.info("Starting RAG pipeline...")
 
@@ -287,7 +287,8 @@ class RAGService:
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
             # Используем NOT_FOUND_PROMPT из менеджера промптов
-            return self.__prompt_manager.get_not_found_message(), None, 0.0
+            return self.__prompt_manager.get_not_found_message(), None, 0.0, None, None
+        
         
         # ЛОГИКА ДИНАМИЧЕСКОГО ВЫБОРА ПРОМПТА
         final_system_instructions = self.__prompt_manager.get_instructions_by_document_id(top_document_id)
@@ -295,8 +296,8 @@ class RAGService:
         # 4. Логика измерения и обрезки контекста
         tokenizer = tiktoken.get_encoding("cl100k_base")
         tokens = tokenizer.encode(context)
-        if len(tokens) > 400:
-            context = tokenizer.decode(tokens[:400])
+        if len(tokens) > 1000:
+            context = tokenizer.decode(tokens[:1000])
         
         size_bytes = len(context.encode('utf-8'))
         size_mb = size_bytes / (1024 * 1024)
@@ -313,4 +314,4 @@ class RAGService:
             page_numbers=page_numbers
         )
         logger.info("RAG pipeline finished successfully.")
-        return final_answer, web_link, score, title
+        return final_answer, web_link, score, title, page_numbers

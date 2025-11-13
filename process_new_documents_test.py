@@ -141,7 +141,7 @@ async def process_new_documents():
             for page_content, page_num in pages:
                 cleaned_content = clean_text(page_content)
                 chunks = split_text_into_chunks(
-                    cleaned_content, chunk_size=200, overlap=40
+                    cleaned_content, chunk_size=200, overlap=50
                 )
                 for chunk in chunks:
                     qdrant_uuid = str(uuid4())
