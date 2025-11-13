@@ -12,16 +12,40 @@ import tiktoken
 from PIL import Image
 
 
-def parse_pdf(content: bytes) -> list[tuple[str, int]]:
-    """Parses a .pdf file and returns its text content, including OCR for images."""
+def parse_pdf(content: bytes) -> list[tuple[str, int, str | None]]:
+    """
+    Parses a .pdf file, extracts text, performs OCR on images, and identifies sections
+    based on headers. Returns a list of tuples: (text_block, page_number, section_title).
+    """
     pdf_document = fitz.open(stream=content, filetype="pdf")
-    text_by_page = []
+    structured_text = []
+    current_section = None
+
+    # Regex to identify headers (e.g., "Глава 1", "Статья 2.3", "Пункт 3.1.1")
+    section_pattern = re.compile(
+        r"^\s*(Глава|Статья|Пункт|Раздел)\s*(\d+(\.\d+)*)\.?\s*(.*)", re.IGNORECASE
+    )
 
     for page_num in range(len(pdf_document)):
         page = pdf_document.load_page(page_num)
-        page_text = page.get_text("text")
 
-        # OCR for images
+        # Using blocks provides more structure than plain text
+        blocks = page.get_text("blocks")
+
+        for block in blocks:
+            block_text = block[4].strip()
+
+            # Check if the block is a section header
+            match = section_pattern.match(block_text)
+            if match:
+                current_section = block_text
+                # We can either skip adding the header as a separate block or include it.
+                # Let's include it, it might contain useful context.
+
+            if block_text:
+                structured_text.append((block_text, page_num + 1, current_section))
+
+        # OCR for images on the page
         image_list = page.get_images(full=True)
         for img_index, img in enumerate(image_list):
             xref = img[0]
@@ -30,77 +54,79 @@ def parse_pdf(content: bytes) -> list[tuple[str, int]]:
             
             try:
                 image = Image.open(BytesIO(image_bytes))
-                ocr_text = pytesseract.image_to_string(image, lang='rus')
-                page_text += "\n" + ocr_text
+                ocr_text = pytesseract.image_to_string(image, lang='rus').strip()
+                if ocr_text:
+                    structured_text.append((ocr_text, page_num + 1, current_section))
             except Exception as e:
                 print(f"Error processing image on page {page_num + 1}: {e}")
-    
-        text_by_page.append((page_text, page_num + 1))
         
-    return text_by_page
+    return structured_text
 
-def parse_docx(content) -> list[tuple[str, int]]:
-    """Parses a .docx file and returns its text content."""
+def parse_docx(content: bytes) -> list[tuple[str, int, str | None]]:
+    """
+    Parses a .docx file, extracts text, and identifies sections based on headers.
+    Returns a list of tuples: (text_block, page_number, section_title).
+    """
     result = docx2python(BytesIO(content))
-    
-    # Text grouped by page
-    text_by_page = []
-    
-    # Iterate over pages
-    for page in result.body:
-        page_text = ""
-        # Iterate over paragraphs on page
-        for paragraph in page:
-            page_text += paragraph.text + "\n"
-        # Add page text and page number
-        text_by_page.append((page_text, page.page_num))
-        
-    return text_by_page
+    structured_text = []
+    current_section = None
 
-def parse_doc(content) -> list[tuple[str, int | None]]:
+    section_pattern = re.compile(
+        r"^\s*(Глава|Статья|Пункт|Раздел)\s*(\d+(\.\d+)*)\.?\s*(.*)", re.IGNORECASE
+    )
+
+    for page_content in result.body:
+        page_num = page_content.page_num
+        for paragraph in page_content:
+            paragraph_text = "".join(paragraph).strip()
+
+            match = section_pattern.match(paragraph_text)
+            if match:
+                current_section = paragraph_text
+
+            if paragraph_text:
+                structured_text.append((paragraph_text, page_num, current_section))
+
+    return structured_text
+
+def parse_doc(content) -> list[tuple[str, int | None, str | None]]:
     """Parses a .doc file and returns its text content."""
-    return [(pypandoc.convert_text(content, 'plain', format='doc'), None)]
+    return [(pypandoc.convert_text(content, 'plain', format='doc'), None, None)]
 
-def parse_rtf(content) -> list[tuple[str, int | None]]:
+def parse_rtf(content) -> list[tuple[str, int | None, str | None]]:
     """Parses an .rtf file and returns its text content."""
-    return [(pypandoc.convert_text(content, 'plain', format='rtf'), None)]
+    return [(pypandoc.convert_text(content, 'plain', format='rtf'), None, None)]
 
-def parse_md(content: str) -> list[tuple[str, int | None]]:
- 
+def parse_md(content: str) -> list[tuple[str, int | None, str | None]]:
     # 1. Convert Markdown to HTML
     html = markdown.markdown(content)
-    
     # 2. Parse the HTML
     soup = BeautifulSoup(html, "html.parser")
-    
     text_content = soup.get_text(separator="\n", strip=True)
-    
-    return [(text_content, None)]
+    return [(text_content, None, None)]
 
-def parse_excel(content: bytes) -> list[tuple[str, int | None]]:
+def parse_excel(content: bytes) -> list[tuple[str, int | None, str | None]]:
     """Parses an Excel file (.xls, .xlsx) and returns its text content."""
     xls = pd.ExcelFile(BytesIO(content))
     full_text = ""
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(xls, sheet_name=sheet_name)
         full_text += df.to_string()
-    return [(full_text, None)]
+    return [(full_text, None, None)]
 
-
-def parse_image(content: bytes) -> list[tuple[str, int | None]]:
+def parse_image(content: bytes) -> list[tuple[str, int | None, str | None]]:
     """Parses an image file and returns its text content using OCR."""
     try:
         image = Image.open(BytesIO(content))
         ocr_text = pytesseract.image_to_string(image, lang="rus")
-        return [(ocr_text, None)]
+        return [(ocr_text, None, None)]
     except Exception as e:
         print(f"Error processing image: {e}")
         return []
 
-
-def parse_txt(content: str) -> list[tuple[str, int | None]]:
+def parse_txt(content: str) -> list[tuple[str, int | None, str | None]]:
     """Parses a .txt file and returns its text content."""
-    return [(content, None)]
+    return [(content, None, None)]
 
 
 def clean_text(text: str) -> str:
@@ -111,78 +137,59 @@ def clean_text(text: str) -> str:
     return cleaned_text
 
 def split_text_into_chunks(
-    text: str, chunk_size: int = 200, overlap: int = 40
-) -> list[str]:
+    structured_data: list[tuple[str, int, str | None]],
+    chunk_size: int = 200,
+    overlap: int = 40,
+) -> list[dict]:
     """
-    Splits the text into chunks of a specified token size with overlap, using a hierarchical approach.
-    The text is first split by paragraphs. If a paragraph is larger than the chunk size,
-    it is further split by sentences.
+    Splits structured text data into chunks using a hierarchical approach.
     """
-    if not text:
+    if not structured_data:
         return []
 
-    # Initialize tokenizer
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    # Split text into paragraphs
-    paragraphs = text.split("\n\n")
+    # Group text blocks by section
+    sections = {}
+    for text, page, section_title in structured_data:
+        if section_title not in sections:
+            sections[section_title] = {"text": "", "page": page}
+        sections[section_title]["text"] += text + " "
 
-    chunks = []
-    for paragraph in paragraphs:
-        # Encode paragraph to tokens
-        paragraph_tokens = tokenizer.encode(paragraph)
+    final_chunks = []
+    for section_title, section_data in sections.items():
+        section_text = section_data["text"].strip()
+        page = section_data["page"]
+
+        # 1. Split by paragraphs
+        paragraphs = section_text.split('\n\n')
         
-        # If paragraph is within chunk size, treat it as a whole chunk
-        if len(paragraph_tokens) <= chunk_size:
-            if paragraph.strip():
-                chunks.append(paragraph)
-        else:
-            # If paragraph is too long, split it by sentences
+        for paragraph in paragraphs:
+            # 2. Split by sentences
             sentences = nltk.sent_tokenize(paragraph, language="russian")
-            current_chunk_tokens = []
+
+            current_chunk_sentences = []
+            current_chunk_tokens = 0
             
             for sentence in sentences:
                 sentence_tokens = tokenizer.encode(sentence)
                 
-                # If adding the new sentence exceeds the chunk size, process the current chunk
-                if len(current_chunk_tokens) + len(sentence_tokens) > chunk_size:
-                    if current_chunk_tokens:
-                        # Decode tokens to string and add to chunks
-                        chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                        if chunk_text:
-                            chunks.append(chunk_text)
-                        
-                        # Start a new chunk with an overlap
-                        current_chunk_tokens = current_chunk_tokens[-overlap:]
-                    else:
-                        # Handle cases where a single sentence is longer than the chunk size
-                        current_chunk_tokens = sentence_tokens
-                
-                current_chunk_tokens.extend(sentence_tokens)
+                if current_chunk_tokens + len(sentence_tokens) > chunk_size and current_chunk_sentences:
+                    # Finalize the current chunk
+                    chunk_text = " ".join(current_chunk_sentences)
+                    final_chunks.append({"text": chunk_text, "page": page, "section": section_title})
 
-            # Add the last remaining chunk
-            if current_chunk_tokens:
-                chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                if chunk_text:
-                    chunks.append(chunk_text)
+                    # Start new chunk with overlap (last few sentences)
+                    # This is a simple way to create overlap, can be improved
+                    current_chunk_sentences = current_chunk_sentences[-2:]
+                    current_chunk_tokens = len(tokenizer.encode(" ".join(current_chunk_sentences)))
 
-    # Apply overlap to the final list of chunks
-    if overlap > 0 and len(chunks) > 1:
-        overlapped_chunks = [chunks[0]]
-        for i in range(1, len(chunks)):
-            # Get the tokens for the previous and current chunks
-            prev_chunk_tokens = tokenizer.encode(chunks[i - 1])
-            current_chunk_tokens = tokenizer.encode(chunks[i])
-            
-            # Create overlap
-            overlap_tokens = prev_chunk_tokens[-overlap:]
-            
-            # Combine overlap with the current chunk
-            overlapped_chunk_tokens = overlap_tokens + current_chunk_tokens
-            
-            # Decode back to string
-            overlapped_chunks.append(tokenizer.decode(overlapped_chunk_tokens))
-            
-        return overlapped_chunks
+                current_chunk_sentences.append(sentence)
+                current_chunk_tokens += len(sentence_tokens)
 
-    return chunks
+            # Add the last remaining chunk for the paragraph
+            if current_chunk_sentences:
+                chunk_text = " ".join(current_chunk_sentences)
+                final_chunks.append({"text": chunk_text, "page": page, "section": section_title})
+
+    return final_chunks
