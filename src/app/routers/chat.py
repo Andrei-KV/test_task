@@ -31,10 +31,8 @@ async def websocket_endpoint(
             # Send "Processing..." message
             await manager.send_personal_message(text="Идёт обработка...", websocket=websocket)
 
-            context_window = await context_manager.get_context_window(client_id)
-            context_query = " ".join([msg["content"] for msg in context_window])
-
-            answer, web_link, score, title = await rag_service.aquery(context_query)
+            # The RAG service should only use the last user query, not the whole context
+            answer, web_link, score, title, page_numbers = await rag_service.aquery(data)
             logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
 
             if score < 0.7:
@@ -44,16 +42,23 @@ async def websocket_endpoint(
                     clarification_question = "Не могли бы вы уточнить вопрос?"
                     await context_manager.add_message(client_id, "bot", clarification_question)
                     await manager.send_personal_message(text=clarification_question, websocket=websocket)
-                else:
+                    # Reset context after asking for clarification
                     await context_manager.reset_context(client_id)
-                    answer, web_link, score, title = await rag_service.aquery(data, low_precision=True)
+                else:
+                    # The context is reset before the low-precision attempt
+                    await context_manager.reset_context(client_id)
+                    answer, web_link, score, title, page_numbers = await rag_service.aquery(data, low_precision=True)
                     warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
                     final_answer = f"{warning}\n\n{answer}"
                     await context_manager.add_message(client_id, "bot", final_answer)
-                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title)
+                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
+                    # Reset context after providing a low-precision answer
+                    await context_manager.reset_context(client_id)
             else:
                 await context_manager.add_message(client_id, "bot", answer)
-                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title)
+                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
+                # Reset context after a successful answer
+                await context_manager.reset_context(client_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

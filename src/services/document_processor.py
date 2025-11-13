@@ -114,9 +114,7 @@ def split_text_into_chunks(
     text: str, chunk_size: int = 200, overlap: int = 40
 ) -> list[str]:
     """
-    Splits the text into chunks of a specified token size with overlap, using a hierarchical approach.
-    The text is first split by paragraphs. If a paragraph is larger than the chunk size,
-    it is further split by sentences.
+    Splits the text into chunks of a specified token size with a sliding window.
     """
     if not text:
         return []
@@ -124,65 +122,23 @@ def split_text_into_chunks(
     # Initialize tokenizer
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    # Split text into paragraphs
-    paragraphs = text.split("\n\n")
+    # Encode the entire text into tokens
+    tokens = tokenizer.encode(text)
+
+    # If the text is smaller than the chunk size, return it as a single chunk
+    if len(tokens) <= chunk_size:
+        return [text]
 
     chunks = []
-    for paragraph in paragraphs:
-        # Encode paragraph to tokens
-        paragraph_tokens = tokenizer.encode(paragraph)
+    # Use a sliding window to create chunks with overlap
+    for i in range(0, len(tokens), chunk_size - overlap):
+        chunk_tokens = tokens[i:i + chunk_size]
+        if not chunk_tokens:
+            continue
         
-        # If paragraph is within chunk size, treat it as a whole chunk
-        if len(paragraph_tokens) <= chunk_size:
-            if paragraph.strip():
-                chunks.append(paragraph)
-        else:
-            # If paragraph is too long, split it by sentences
-            sentences = nltk.sent_tokenize(paragraph, language="russian")
-            current_chunk_tokens = []
+        # Decode tokens back to string
+        chunk_text = tokenizer.decode(chunk_tokens).strip()
+        if chunk_text:
+            chunks.append(chunk_text)
             
-            for sentence in sentences:
-                sentence_tokens = tokenizer.encode(sentence)
-                
-                # If adding the new sentence exceeds the chunk size, process the current chunk
-                if len(current_chunk_tokens) + len(sentence_tokens) > chunk_size:
-                    if current_chunk_tokens:
-                        # Decode tokens to string and add to chunks
-                        chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                        if chunk_text:
-                            chunks.append(chunk_text)
-                        
-                        # Start a new chunk with an overlap
-                        current_chunk_tokens = current_chunk_tokens[-overlap:]
-                    else:
-                        # Handle cases where a single sentence is longer than the chunk size
-                        current_chunk_tokens = sentence_tokens
-                
-                current_chunk_tokens.extend(sentence_tokens)
-
-            # Add the last remaining chunk
-            if current_chunk_tokens:
-                chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                if chunk_text:
-                    chunks.append(chunk_text)
-
-    # Apply overlap to the final list of chunks
-    if overlap > 0 and len(chunks) > 1:
-        overlapped_chunks = [chunks[0]]
-        for i in range(1, len(chunks)):
-            # Get the tokens for the previous and current chunks
-            prev_chunk_tokens = tokenizer.encode(chunks[i - 1])
-            current_chunk_tokens = tokenizer.encode(chunks[i])
-            
-            # Create overlap
-            overlap_tokens = prev_chunk_tokens[-overlap:]
-            
-            # Combine overlap with the current chunk
-            overlapped_chunk_tokens = overlap_tokens + current_chunk_tokens
-            
-            # Decode back to string
-            overlapped_chunks.append(tokenizer.decode(overlapped_chunk_tokens))
-            
-        return overlapped_chunks
-
     return chunks

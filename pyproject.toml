@@ -29,6 +29,9 @@ dependencies = [
     "pandas (>=2.3.3,<3.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
     "xlrd (>=2.0.2,<3.0.0)",
+    "google-api-python-client (>=2.187.0,<3.0.0)",
+    "sentence-transformers (>=5.1.2,<6.0.0)",
+    "qdrant-client (>=1.15.1,<2.0.0)",
 ]
 
 
