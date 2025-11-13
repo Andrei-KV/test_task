@@ -77,6 +77,8 @@ class DataMapper:
             payload = {
                  "chunk_id": chunk_obj.chunk_id,
                  "document_id": chunk_obj.document_id,
+                 "page_number": chunk_obj.page_number,
+                 "section": chunk_obj.section,
                  "content_preview": chunk_obj.content[:100] + "..."
             }
             point = PointStruct(
