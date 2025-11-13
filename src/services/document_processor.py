@@ -30,43 +30,43 @@ def parse_pdf(content: bytes) -> list[tuple[str, int]]:
         if image_list:
             logger.info(f"Found {len(image_list)} images on page {page_num + 1}")
                             
-            for img_index, img in enumerate(image_list):
-                try:
-                    xref = img[0]
-                    pix = fitz.Pixmap(pdf_document, xref)
+            # for img_index, img in enumerate(image_list):
+            #     try:
+            #         xref = img[0]
+            #         pix = fitz.Pixmap(pdf_document, xref)
                                     
-                    # Check if image is valid for OCR
-                    if pix.n - pix.alpha < 4:  # GRAY or RGB
-                        # Save image to temporary file for OCR processing
-                        temp_dir = tempfile.gettempdir()
-                        temp_img_path = os.path.join(temp_dir, f"pdf_image_{page_num}_{img_index}.png")
-                        pix.save(temp_img_path)
+            #         # Check if image is valid for OCR
+            #         if pix.n - pix.alpha < 4:  # GRAY or RGB
+            #             # Save image to temporary file for OCR processing
+            #             temp_dir = tempfile.gettempdir()
+            #             temp_img_path = os.path.join(temp_dir, f"pdf_image_{page_num}_{img_index}.png")
+            #             pix.save(temp_img_path)
                         
-                        # Extract text using OCR
-                        ocr_text = pytesseract.image_to_string(temp_img_path, lang='rus')
-                        if ocr_text and len(ocr_text.strip()) > 10:  # Only add if meaningful text
-                            page_text += "\n" + ocr_text
-                            logger.info(f"OCR extracted {len(ocr_text)} characters from image on page {page_num + 1}")
-                        else:
-                            logger.debug(f"OCR returned insufficient text from image on page {page_num + 1}")
+            #             # Extract text using OCR
+            #             ocr_text = pytesseract.image_to_string(temp_img_path, lang='rus')
+            #             if ocr_text and len(ocr_text.strip()) > 10:  # Only add if meaningful text
+            #                 page_text += "\n" + ocr_text
+            #                 logger.info(f"OCR extracted {len(ocr_text)} characters from image on page {page_num + 1}")
+            #             else:
+            #                 logger.debug(f"OCR returned insufficient text from image on page {page_num + 1}")
                         
-                        # Clean up temporary file
-                        try:
-                            os.remove(temp_img_path)
-                        except:
-                            pass
+            #             # Clean up temporary file
+            #             try:
+            #                 os.remove(temp_img_path)
+            #             except:
+            #                 pass
                     
-                    pix = None
+            #         pix = None
 
-                except Exception as e:
-                    logger.info(f"Error processing image on page {page_num + 1}: {e}")
-                    pix = None
-                finally:
-                        # Гарантирует, что файл не останется, даже если была ошибка.
-                        if os.path.exists(temp_img_path):
-                            os.remove(temp_img_path)
+            #     except Exception as e:
+            #         logger.info(f"Error processing image on page {page_num + 1}: {e}")
+            #         pix = None
+            #     finally:
+            #             # Гарантирует, что файл не останется, даже если была ошибка.
+            #             if os.path.exists(temp_img_path):
+            #                 os.remove(temp_img_path)
         
-            text_by_page.append((page_text, page_num + 1))
+        text_by_page.append((page_text, page_num + 1))
 
     return text_by_page
 
@@ -118,15 +118,15 @@ def parse_excel(content: bytes) -> list[tuple[str, int | None]]:
     return [(full_text, None)]
 
 
-def parse_image(content: bytes) -> list[tuple[str, int | None]]:
-    """Parses an image file and returns its text content using OCR."""
-    try:
-        image = Image.open(BytesIO(content))
-        ocr_text = pytesseract.image_to_string(image, lang="rus")
-        return [(ocr_text, None)]
-    except Exception as e:
-        print(f"Error processing image: {e}")
-        return []
+# def parse_image(content: bytes) -> list[tuple[str, int | None]]:
+#     """Parses an image file and returns its text content using OCR."""
+#     try:
+#         image = Image.open(BytesIO(content))
+#         ocr_text = pytesseract.image_to_string(image, lang="rus")
+#         return [(ocr_text, None)]
+#     except Exception as e:
+#         print(f"Error processing image: {e}")
+#         return []
 
 
 def parse_txt(content: str) -> list[tuple[str, int | None]]:
