@@ -12,14 +12,7 @@ from src.database.database import AsyncSessionLocal, async_engine, init_db
 from src.database.models import Document, DocumentChunk
 from src.services.document_processor import (
     clean_text,
-    parse_doc,
-    parse_docx,
-    parse_md,
-    parse_excel,
-    parse_image,
-    parse_pdf,
-    parse_rtf,
-    parse_txt,
+    parse_document,
     split_text_into_chunks,
 )
 from src.services.google_drive import (
@@ -109,33 +102,7 @@ async def process_new_documents():
             if raw_content_bytes is None:
                 continue
 
-            pages = []
-            if (
-                file_mime_type
-                == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ):
-                pages = parse_docx(raw_content_bytes)
-            elif file_mime_type == "application/pdf":
-                pages = parse_pdf(raw_content_bytes)
-            elif file_mime_type == "application/msword":
-                pages = parse_doc(raw_content_bytes)
-            elif file_mime_type == "application/rtf":
-                pages = parse_rtf(raw_content_bytes)
-            elif file_mime_type == "text/markdown":
-                pages = parse_md(raw_content_bytes.decode("utf-8"))
-            elif file_mime_type == "text/plain":
-                pages = parse_txt(raw_content_bytes.decode("utf-8"))
-            elif (
-                file_mime_type
-                == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                or file_mime_type == "application/vnd.ms-excel"
-            ):
-                pages = parse_excel(raw_content_bytes)
-            elif file_mime_type.startswith("image/"):
-                pages = parse_image(raw_content_bytes)
-            else:
-                logger.warning(f"Unsupported file format: {file_mime_type}")
-                continue
+            pages = parse_document(raw_content_bytes, file_name)
 
             chunk_objects_to_process = []
             for page_content, page_num in pages:
