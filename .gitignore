@@ -12,5 +12,12 @@ update_database.py
 pages_test.txt
 chunks_test2.txt
 test_file_2.py
+test_select_chunks.py
+test_chunks_doc1.txt
+test_process_new_documents_test.py
+test_websocket_manager.py
+test_chat.py
+test_document_processor.py
+test_rag_service.py
 
 .+3%M_gn2H9yiYb

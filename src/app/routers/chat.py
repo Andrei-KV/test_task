@@ -34,7 +34,7 @@ async def websocket_endpoint(
             context_window = await context_manager.get_context_window(client_id)
             context_query = " ".join([msg["content"] for msg in context_window])
 
-            answer, web_link, score, title = await rag_service.aquery(context_query)
+            answer, web_link, score, title, page_numbers = await rag_service.aquery(context_query)
             logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
 
             if score < 0.7:
@@ -46,16 +46,16 @@ async def websocket_endpoint(
                     await manager.send_personal_message(text=clarification_question, websocket=websocket)
                 else:
                     await context_manager.reset_context(client_id)
-                    answer, web_link, score, title = await rag_service.aquery(data, low_precision=True)
+                    answer, web_link, score, title, page_numbers = await rag_service.aquery(data, low_precision=True)
                     warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
                     final_answer = f"{warning}\n\n{answer}"
                     await context_manager.add_message(client_id, "bot", final_answer)
-                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title)
+                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
                     #  Reset context after providing a low-precision answer
                     await context_manager.reset_context(client_id)
             else:
                 await context_manager.add_message(client_id, "bot", answer)
-                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title)
+                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
                 # Reset context after a successful answer
                 await context_manager.reset_context(client_id)
 

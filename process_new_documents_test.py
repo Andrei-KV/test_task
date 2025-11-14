@@ -136,13 +136,18 @@ async def process_new_documents():
             else:
                 logger.warning(f"Unsupported file format: {file_mime_type}")
                 continue
-
+            
+            previous_overlap_sentences = []
             chunk_objects_to_process = []
             for page_content, page_num in pages:
-                cleaned_content = clean_text(page_content)
-                chunks = split_text_into_chunks(
-                    cleaned_content, chunk_size=200, overlap=50
+                # cleaned_content = clean_text(page_content)
+                chunks, current_tail = split_text_into_chunks(
+                    page_content, 
+                    chunk_size=300, 
+                    overlap=50,
+                    previous_overlap_sentences=previous_overlap_sentences # tail prev page
                 )
+                previous_overlap_sentences = current_tail
                 for chunk in chunks:
                     qdrant_uuid = str(uuid4())
                     new_document_chunk = DocumentChunk(
