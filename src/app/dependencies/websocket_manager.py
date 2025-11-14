@@ -1,35 +1,42 @@
-from typing import List, Optional
 from fastapi import WebSocket
-
+from typing import List, Dict
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: Dict[str, WebSocket] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.active_connections[websocket.client.host] = websocket
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        del self.active_connections[websocket.client.host]
 
-    async def send_personal_message(self, text: str, websocket: WebSocket, web_link: Optional[str] = None,  title: Optional[str] = None, page_numbers: list[int] = None):
-        """
-        Отправляет персональное сообщение.
-        Если web_link предоставлен, отправляет JSON.
-        В противном случае, отправляет обычный текст.
-        """
+    async def send_personal_message(
+        self,
+        text: str,
+        websocket: WebSocket,
+        web_link: str = None,
+        title: str = None,
+        page_numbers: list[int] = None,
+        sections: list[str] = None
+    ):
         if web_link:
-            payload = {
+            # Отправляем JSON, если есть веб-ссылка
+            response = {
                 "text": text,
                 "web_link": web_link,
-                'title': title
+                "title": title,
+                "page_numbers": page_numbers or [],
+                "sections": sections or []
             }
-            if page_numbers:
-                payload["page_numbers"] = page_numbers
-            await websocket.send_json(payload)
+            await websocket.send_json(response)
         else:
+            # Отправляем обычный текст для простых сообщений (например, "Идёт обработка...")
             await websocket.send_text(text)
 
+    async def broadcast(self, message: str):
+        for connection in self.active_connections.values():
+            await connection.send_text(message)
 
 manager = ConnectionManager()
