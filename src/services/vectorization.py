@@ -77,6 +77,8 @@ class DataMapper:
             payload = {
                  "chunk_id": chunk_obj.chunk_id,
                  "document_id": chunk_obj.document_id,
+                 "page_number": chunk_obj.page_number,
+                 "section": chunk_obj.section,
                  "content_preview": chunk_obj.content[:100] + "..."
             }
             point = PointStruct(
@@ -94,14 +96,24 @@ class IndexingPipeline:
         self.__embedder = embedding_service
         self.__qdrant = qdrant_wrapper
         
-    def run(self, chunk_objects: list):
-        """Выполняет полный цикл индексации для списка фрагментов."""
-        
+    def run(self, chunk_objects: list, batch_size: int = 100):
+        """
+        Выполняет полный цикл индексации для списка фрагментов с использованием батчинга.
+        """
         self.__qdrant.ensure_collection_exists(self.__embedder.vector_dimension)
-        chunks_text = [chunk.content for chunk in chunk_objects]
-        embeddings = self.__embedder.vectorize_chunks(chunks_text)
-        points = DataMapper.to_qdrant_points(chunk_objects, embeddings)
-        self.__qdrant.upsert_points(points)
+
+        total_chunks = len(chunk_objects)
+        logger.info(f"Starting indexing for {total_chunks} chunks...")
+
+        for i in range(0, total_chunks, batch_size):
+            batch_objects = chunk_objects[i:i + batch_size]
+            logger.info(f"Processing batch {i // batch_size + 1}/{(total_chunks + batch_size - 1) // batch_size}...")
+
+            chunks_text = [chunk.content for chunk in batch_objects]
+            embeddings = self.__embedder.vectorize_chunks(chunks_text)
+            points = DataMapper.to_qdrant_points(batch_objects, embeddings)
+
+            self.__qdrant.upsert_points(points)
         
         logger.info("✅ Индексация завершена.")
 

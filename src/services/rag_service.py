@@ -89,7 +89,7 @@ class ContextRetriever:
 
         from sqlalchemy import select
         stmt = (
-            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number)
+            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number, DocumentChunk.section)
            .join(Document)
            .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
            .order_by(DocumentChunk.chunk_id)
@@ -98,17 +98,18 @@ class ContextRetriever:
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None, None, None, 0.0, []
+            return " ", None, None, None, 0.0, [], []
 
         full_context = [result.content for result in sql_results]
         page_numbers = [result.page_number for result in sql_results]
+        sections = [result.section for result in sql_results]
         web_link = sql_results[0].web_link
         title = sql_results[0].title
         context = "\n\n".join(full_context)
         max_score = max([result.score for result in qdrant_results])
         logger.info("Full context retrieved successfully.")
         logger.debug(context[:500])
-        return context, web_link, title, top_document_id, max_score, page_numbers
+        return context, web_link, title, top_document_id, max_score, page_numbers, sections
 
 
 class LLMGenerator:
@@ -122,27 +123,27 @@ class LLMGenerator:
             self.__client = genai.Client(api_key=api_key)
         self.__model_name = model_name
 
-    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: list[int], low_precision: bool = False) -> str:
+    async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: list[int], sections: list[str], low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
-        # temperature = 0.6 if low_precision else 0.1
         temperature = 0
 
-        # page_numbers may have duplicates, so we use a set to get unique page numbers
         unique_page_numbers = sorted(list(set(filter(None, page_numbers)))) if page_numbers else []
-        
-        # Format the page numbers into a string
         pages_str = ", ".join(map(str, unique_page_numbers))
 
-        # Формируем финальный системный промпт с информацией о документе
+        unique_sections = sorted(list(set(filter(None, sections)))) if sections else []
+        sections_str = ", ".join(unique_sections)
+
         final_system_prompt = (
-            f"{system_instructions.format(web_link=web_link, pages_str=pages_str)}\n\n"
+            f"{system_instructions.format(web_link=web_link, pages_str=pages_str, sections_str=sections_str)}\n\n"
             f"**Название документа:** {title}\n"
             f"**Веб-ссылка на документ:** {web_link}\n"
         )
         if pages_str:
-            final_system_prompt += f"**Страницы:** {pages_str}\n\n"
-        final_system_prompt += f"<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
+            final_system_prompt += f"**Страницы:** {pages_str}\n"
+        if sections_str:
+            final_system_prompt += f"**Разделы:** {sections_str}\n"
+        final_system_prompt += f"\n<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
 
         try:
             if self.__model_name == "deepseek-chat":
@@ -213,14 +214,15 @@ class PromptManager:
             "4.  **Детализация:**\n"
             "    * **Перечни и Условия:** Любые списки требований, шагов или перечней должны быть оформлены как **нумерованный список** (`1.`, `2.`, `3.`) или маркированный список (`*`).\n"
             "    * **Акценты:** **Ключевые термины, числовые значения, стандарты и важные условия** должны быть выделены **жирным шрифтом** (`**слово**`).\n"
-            "5.  **Атрибуция (Источники):** В самом конце ответа, после горизонтальной черты (`---`), создай секцию под заголовком `### Использованные Источники`.\n"
-            "    * Сначала перечисли все **части документа** (`Пункт 1`, `Глава 2` и т.д.), которые были использованы для формирования ответа.\n"
-            "    * В конце этой секции добавь **веб-ссылку** на полный документ.\n\n"
-            "6. Сокращение Вводных Фраз: Исключитm фразы типа 'Отличный вопрос. Это фундаментальное понятие...'. Система-промпт  'Эксперт', подразумевает, что модель сразу переходит к фактам."
-            "### КОНТРОЛЬ ДЛИНЫ И ПОЛНОТЫ ОТВЕТА:"
-                "1.  **Приоритет завершения:** Ответ должен быть **полностью завершен** и логически окончен. При приближении к лимиту токенов, модель должна **уплотнять информацию** и завершать текущую мысль."
-                "2.  **Экономия токенов:** Избегай излишних вводных фраз, приветствий и развернутых предложений. Используй краткий, технический стиль, максимально используя **списки и выделение** для экономии токенов."
-                "3.  **Максимальная длина:** Твой полный ответ (включая все заголовки и источники) **не должен превышать 800 токенов**, чтобы гарантировать завершение."
+            "5.  **Атрибуция (Источники):** В самом конце ответа, после горизонтальной черты (`---`), создай секцию `### Использованные Источники`.\n"
+            "    * **ОБЯЗАТЕЛЬНО:** Укажи **номера страниц** (из переменной `{pages_str}`) и **названия разделов** (из переменной `{sections_str}`), если они доступны в контексте. Это критически важно.\n"
+            "    * После этого перечисли конкретные **части документа** (например, `Пункт 1.1`, `Глава 2`), на которые ты ссылался.\n"
+            "    * В конце секции добавь **веб-ссылку** на полный документ, используя `[Название документа]({web_link})`.\n\n"
+            "6. **Сокращение Вводных Фраз:** Исключи фразы типа 'Отличный вопрос. Это фундаментальное понятие...'. Система-промпт 'Эксперт', подразумевает, что модель сразу переходит к фактам.\n"
+            "### КОНТРОЛЬ ДЛИНЫ И ПОЛНОТЫ ОТВЕТА:\n"
+            "1.  **Приоритет завершения:** Ответ должен быть **полностью завершен** и логически окончен. При приближении к лимиту токенов, модель должна **уплотнять информацию** и завершать текущую мысль.\n"
+            "2.  **Экономия токенов:** Избегай излишних вводных фраз, приветствий и развернутых предложений. Используй краткий, технический стиль, максимально используя **списки и выделение** для экономии токенов.\n"
+            "3.  **Максимальная длина:** Твой полный ответ (включая все заголовки и источники) **не должен превышать 800 токенов**, чтобы гарантировать завершение.\n"
             "### ПРИМЕР ЖЕЛАЕМОГО ФОРМАТА:\n"
             "```markdown\n"
             "### Основные Требования к Экранированию Кабелей\n"
@@ -231,7 +233,8 @@ class PromptManager:
             "2.  **Материал:** Экран должен быть выполнен из **медного** или **алюминиевого** проводника.\n\n"
             "---\n\n"
             "### Использованные Источники:\n"
-            "* **Части документа:** Секция 2.1.3, Параграф 5.2.14, Глава 7, стр. {pages_str}.\n"
+            "* **Разделы:** {sections_str}\n"
+            "* **Страницы:** {pages_str}\n"
             "* **Веб-ссылка:** [Название документа]({web_link})\n"
             "```"
         ),
@@ -270,7 +273,7 @@ class RAGService:
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
         self.__prompt_manager = prompt_manager # ✅ Сохраняем менеджер промптов
 
-    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None, float]:
+    async def aquery(self, user_query: str, low_precision: bool = False) -> tuple[str, str | None, float, str, list[int] | None, list[str] | None]:
         """Основной метод, выполняющий полный цикл RAG."""
         logger.info("Starting RAG pipeline...")
 
@@ -282,12 +285,11 @@ class RAGService:
 
         # 3. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, title, top_document_id, score, page_numbers = await self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, title, top_document_id, score, page_numbers, sections = await self.__retriever.retrieve_full_context(qdrant_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
-            # Используем NOT_FOUND_PROMPT из менеджера промптов
-            return self.__prompt_manager.get_not_found_message(), None, 0.0
+            return self.__prompt_manager.get_not_found_message(), None, 0.0, None, None, None
         
         # ЛОГИКА ДИНАМИЧЕСКОГО ВЫБОРА ПРОМПТА
         final_system_instructions = self.__prompt_manager.get_instructions_by_document_id(top_document_id)
@@ -310,7 +312,8 @@ class RAGService:
             low_precision=low_precision,
             title=title,
             web_link=web_link,
-            page_numbers=page_numbers
+            page_numbers=page_numbers,
+            sections=sections
         )
         logger.info("RAG pipeline finished successfully.")
-        return final_answer, web_link, score, title
+        return final_answer, web_link, score, title, page_numbers, sections

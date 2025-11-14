@@ -137,22 +137,32 @@ async def process_new_documents():
                 logger.warning(f"Unsupported file format: {file_mime_type}")
                 continue
 
+            # The structured data from parsers is now a list of (text, page, section)
+            structured_data = pages
+
+            # Clean the text content within the structured data
+            cleaned_structured_data = [
+                (clean_text(text), page, section) for text, page, section in structured_data
+            ]
+
+            # Pass the cleaned structured data to the chunker
+            chunks = split_text_into_chunks(
+                cleaned_structured_data, chunk_size=200, overlap=40
+            )
+
             chunk_objects_to_process = []
-            for page_content, page_num in pages:
-                cleaned_content = clean_text(page_content)
-                chunks = split_text_into_chunks(
-                    cleaned_content, chunk_size=200, overlap=40
+            for chunk_data in chunks:
+                qdrant_uuid = str(uuid4())
+                new_document_chunk = DocumentChunk(
+                    document_id=document_id,
+                    content=chunk_data["text"],
+                    page_number=chunk_data["page"],
+                    section=chunk_data["section"],
+                    qdrant_id=qdrant_uuid,
                 )
-                for chunk in chunks:
-                    qdrant_uuid = str(uuid4())
-                    new_document_chunk = DocumentChunk(
-                        document_id=document_id,
-                        content=chunk,
-                        page_number=page_num,
-                        qdrant_id=qdrant_uuid,
-                    )
-                    session.add(new_document_chunk)
-                    chunk_objects_to_process.append(new_document_chunk)
+                session.add(new_document_chunk)
+                chunk_objects_to_process.append(new_document_chunk)
+
             await session.commit()
             logger.info("Committed new chunks to the database.")
             indexing_pipe_line.run(chunk_objects_to_process)
