@@ -22,8 +22,17 @@ def parse_pdf(content: bytes) -> list[tuple[str, int]]:
 
     for page_num in range(len(pdf_document)):
         page = pdf_document.load_page(page_num)
-        # Extract text
-        page_text = page.get_text("text")
+
+        # Define the area to extract text from, ignoring headers and footers
+        # These values can be adjusted as needed
+        header_margin = 50  # a small margin from the top
+        footer_margin = page.rect.height - 50  # a small margin from the bottom
+
+        # Define a clipping rectangle
+        clip_rect = fitz.Rect(0, header_margin, page.rect.width, footer_margin)
+
+        # Extract text within the defined rectangle
+        page_text = page.get_text("text", clip=clip_rect)
 
         # Check for images and extract text using OCR
         image_list = page.get_images(full=True)
@@ -146,79 +155,71 @@ def split_text_into_chunks(
     text: str, chunk_size: int = 200, overlap: int = 50
 ) -> list[str]:
     """
-    Splits the text into chunks of a specified token size with overlap, using a hierarchical approach.
-    The text is first split by paragraphs. If a paragraph is larger than the chunk size,
-    it is further split by sentences.
+    Splits the text into chunks of a specified token size with overlap.
+    The text is first split into paragraphs. Paragraphs are cleaned and filtered, and then
+    grouped into chunks. If a paragraph is larger than the chunk size, it's split into sentences.
     """
     if not text:
         return []
-  
-    # Initialize tokenizer
+
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    # Split text into paragraphs
+    # 1. Split text into paragraphs
     pattern = r'\n\s*\n+'
     paragraphs = re.split(pattern, text)
-    logger.info('paragraphs[:7]', paragraphs)
-    # Удаляем пустые элементы, которые могут появиться из-за пробелов в начале/конце файла
-    paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
-    chunks = []
-    for paragraph in paragraphs:
-        # Encode paragraph to tokens
-        paragraph_tokens = tokenizer.encode(paragraph)
-        
-        # If paragraph is within chunk size, treat it as a whole chunk
-        if len(paragraph_tokens) <= chunk_size:
-            if paragraph.strip():
-                chunks.append(paragraph)
+    # 2. Clean and filter paragraphs
+    cleaned_paragraphs = []
+    for p in paragraphs:
+        cleaned_p = clean_text(p)
+        if len(cleaned_p.split()) >= 3:  # Filter out paragraphs with less than 3 words
+            cleaned_paragraphs.append(cleaned_p)
+
+    if not cleaned_paragraphs:
+        return []
+
+    # 3. Split long paragraphs into sentences
+    docs_for_chunking = []
+    for p in cleaned_paragraphs:
+        p_tokens = tokenizer.encode(p)
+        if len(p_tokens) > chunk_size:
+            sentences = nltk.sent_tokenize(p, language="russian")
+            docs_for_chunking.extend(sentences)
         else:
-            # If paragraph is too long, split it by sentences
-            sentences = nltk.sent_tokenize(paragraph, language="russian")
-            current_chunk_tokens = []
-            
-            for sentence in sentences:
-                sentence_tokens = tokenizer.encode(sentence)
-                
-                # If adding the new sentence exceeds the chunk size, process the current chunk
-                if len(current_chunk_tokens) + len(sentence_tokens) > chunk_size:
-                    if current_chunk_tokens:
-                        # Decode tokens to string and add to chunks
-                        chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                        if chunk_text:
-                            chunks.append(chunk_text)
-                        
-                        # Start a new chunk with an overlap
-                        current_chunk_tokens = current_chunk_tokens[-overlap:]
+            docs_for_chunking.append(p)
+
+    # 4. Group docs into chunks
+    chunks = []
+    current_chunk_paragraphs = []
+
+    for paragraph in docs_for_chunking:
+        current_chunk_paragraphs.append(paragraph)
+        current_chunk_text = "\n\n".join(current_chunk_paragraphs)
+        current_chunk_tokens = len(tokenizer.encode(current_chunk_text))
+
+        if current_chunk_tokens > chunk_size and len(current_chunk_paragraphs) > 1:
+            # Chunk is full, finalize the chunk *before* adding the last paragraph
+            final_chunk_paras = current_chunk_paragraphs[:-1]
+            if final_chunk_paras:
+                chunks.append("\n\n".join(final_chunk_paras))
+
+            # Start a new chunk with overlap
+            overlap_paras = []
+            overlap_tokens = 0
+            if final_chunk_paras:
+                for p_rev in reversed(final_chunk_paras):
+                    p_rev_tokens = len(tokenizer.encode(p_rev))
+                    if overlap_tokens + p_rev_tokens <= overlap:
+                        overlap_paras.insert(0, p_rev)
+                        overlap_tokens += p_rev_tokens
                     else:
-                        # Handle cases where a single sentence is longer than the chunk size
-                        current_chunk_tokens = sentence_tokens
-                
-                current_chunk_tokens.extend(sentence_tokens)
+                        break
+            
+            # The new chunk consists of the overlap and the paragraph that caused the overflow
+            current_chunk_paragraphs = overlap_paras + [paragraph]
 
-            # Add the last remaining chunk
-            if current_chunk_tokens:
-                chunk_text = tokenizer.decode(current_chunk_tokens).strip()
-                if chunk_text:
-                    chunks.append(chunk_text)
-
-    # Apply overlap to the final list of chunks
-    if overlap > 0 and len(chunks) > 1:
-        overlapped_chunks = [chunks[0]]
-        for i in range(1, len(chunks)):
-            # Get the tokens for the previous and current chunks
-            prev_chunk_tokens = tokenizer.encode(chunks[i - 1])
-            current_chunk_tokens = tokenizer.encode(chunks[i])
-            
-            # Create overlap
-            overlap_tokens = prev_chunk_tokens[-overlap:]
-            
-            # Combine overlap with the current chunk
-            overlapped_chunk_tokens = overlap_tokens + current_chunk_tokens
-            
-            # Decode back to string
-            overlapped_chunks.append(tokenizer.decode(overlapped_chunk_tokens))
-            
-        return overlapped_chunks
+    # Add the last remaining chunk
+    if current_chunk_paragraphs:
+        chunks.append("\n\n".join(current_chunk_paragraphs))
 
     return chunks
