@@ -148,6 +148,10 @@ def split_text_into_chunks(
     previous_overlap_sentences: list[str] = None
 ) -> tuple[list[str], list[str]]:
     """
+    Note for future improvement: The current chunking logic is sentence-based, which can lead to paragraphs or lists being split across multiple chunks.
+    A better approach would be to use a paragraph-based chunking strategy to maintain the integrity of the document structure.
+    """
+    """
     Splits the text into chunks of a specified token size with overlap.
     The text is first split into paragraphs. Paragraphs are cleaned and filtered.
     Chunks are then created by greedily adding paragraphs until the chunk size is reached.
