@@ -11,6 +11,7 @@ from ..config import COLLECTION_NAME, LLM_MODEL, DEEPSEEK_API_KEY, QDRANT_HOST, 
 from src.app.logging_config import get_logger
 from google import genai
 from google.genai.types import GenerateContentConfig
+from flashrank import Ranker, RerankRequest
 
 logger = get_logger(__name__)
 
@@ -47,7 +48,7 @@ class QueryQdrantClient:
         self.__client = AsyncQdrantClient(url=host)
         self.__collection_name = collection_name
 
-    async def semantic_search(self, query_vector: list[float], limit_k: int = 6):
+    async def semantic_search(self, query_vector: list[float], limit_k: int = 30):
         """Выполняет семантический поиск в Qdrant."""
         logger.info("Performing semantic search in Qdrant...")
         search_result = await self.__client.query_points(
@@ -64,6 +65,24 @@ class QueryQdrantClient:
         logger.info("Semantic search completed.")
         return search_result.points
 
+class RerankingService:
+    def __init__(self, model_name: str = "ms-marco-MiniLM-L-12-v2"):
+        self.__ranker = Ranker(model_name=model_name)
+
+    def rerank(self, query: str, documents: list) -> list:
+        """Reranks a list of documents based on a query."""
+        passages = [{"id": i, "text": doc.payload.get('content', '')} for i, doc in enumerate(documents)]
+        rerank_request = RerankRequest(query=query, passages=passages)
+        reranked_results = self.__ranker.rerank(rerank_request)
+
+        # Map reranked results back to original document objects
+        reranked_docs = []
+        for result in reranked_results:
+            original_index = result['id']
+            reranked_docs.append(documents[original_index])
+            reranked_docs[-1].score = result['score'] # Update score
+        return reranked_docs
+
 # Извлечение контекста из БД PostgreSQL
 class ContextRetriever:
     """Инкапсулирует логику извлечения полного контекста из PostgreSQL."""
@@ -71,28 +90,41 @@ class ContextRetriever:
     async def retrieve_full_context(self, qdrant_results, session: AsyncSession) -> tuple:
         """Извлекает полный текстовый контекст по результатам Qdrant."""
         logger.info("Retrieving full context from PostgreSQL...")
-    
+
         try:
             top_document_id = qdrant_results[0].payload.get('document_id')
         except (IndexError, KeyError):
             logger.warning("No document ID found in Qdrant results.")
             return " ", None, None, None, 0.0, []
 
-        relevant_chunk_ids = [
+        # 1. Получаем ID 3 самых релевантных чанков
+        top_chunk_ids = [
             result.payload.get('chunk_id')
-            for result in qdrant_results
+            for result in qdrant_results[:3]
             if result.payload.get('document_id') == top_document_id
         ]
-        if not relevant_chunk_ids:
+        if not top_chunk_ids:
             logger.warning("No relevant chunk IDs found.")
             return " ", None, None, None, 0.0, []
 
+        # 2. Расширяем ID, добавляя соседей (+1 и -1)
+        expanded_chunk_ids = set()
+        for chunk_id in top_chunk_ids:
+            expanded_chunk_ids.add(chunk_id)
+            if chunk_id > 1:  # Предотвращаем ID < 1
+                expanded_chunk_ids.add(chunk_id - 1)
+            expanded_chunk_ids.add(chunk_id + 1)
+
+        # 3. Извлекаем все чанки (включая соседей) из БД одним запросом
         from sqlalchemy import select
         stmt = (
-            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number)
-           .join(Document)
-           .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
-           .order_by(DocumentChunk.chunk_id)
+            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number, DocumentChunk.chunk_id)
+            .join(Document)
+            .where(
+                Document.document_id == top_document_id,
+                DocumentChunk.chunk_id.in_(expanded_chunk_ids)
+            )
+            .order_by(DocumentChunk.chunk_id)  # Гарантируем правильный порядок
         )
         sql_results = (await session.execute(stmt)).fetchall()
 
@@ -100,14 +132,29 @@ class ContextRetriever:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
             return " ", None, None, None, 0.0, []
 
-        full_context = [result.content for result in sql_results]
-        page_numbers = [result.page_number for result in sql_results]
+        # 4. Собираем контекст, удаляя дубликаты и сохраняя порядок
+        unique_chunks = {}
+        for result in sql_results:
+            if result.chunk_id not in unique_chunks:
+                unique_chunks[result.chunk_id] = {
+                    "content": result.content,
+                    "page_number": result.page_number
+                }
+
+        # Сортируем по chunk_id перед сборкой
+        sorted_chunk_ids = sorted(unique_chunks.keys())
+
+        full_context = [unique_chunks[cid]['content'] for cid in sorted_chunk_ids]
+        page_numbers = [unique_chunks[cid]['page_number'] for cid in sorted_chunk_ids]
+
         web_link = sql_results[0].web_link
         title = sql_results[0].title
         context = "\n\n".join(full_context)
         max_score = max([result.score for result in qdrant_results])
+
         logger.info("Full context retrieved successfully.")
         logger.debug(context[:500])
+
         return context, web_link, title, top_document_id, max_score, page_numbers
 
 
@@ -266,11 +313,13 @@ class RAGService:
     """Центральный класс, управляющий последовательностью операций RAG."""
 
     def __init__(self, embedder: QueryEmbeddingService, searcher: QueryQdrantClient, 
-                 retriever: ContextRetriever, generator: LLMGenerator, session_factory,
+                 reranker: RerankingService, retriever: ContextRetriever,
+                 generator: LLMGenerator, session_factory,
                  prompt_manager: PromptManager):
         # Внедрение зависимостей (Dependency Injection)
         self.__embedder = embedder
         self.__searcher = searcher
+        self.__reranker = reranker
         self.__retriever = retriever
         self.__generator = generator
         self.__SessionLocal = session_factory # Фабрика сессий передается, но управляется в run_pipeline
@@ -286,9 +335,12 @@ class RAGService:
         # 2. Семантический поиск
         qdrant_results = await self.__searcher.semantic_search(query_vector)
 
-        # 3. Извлечение контекста (управление транзакцией БД)
+        # 3. Ранжирование результатов
+        reranked_results = self.__reranker.rerank(user_query, qdrant_results)
+
+        # 4. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, title, top_document_id, score, page_numbers = await self.__retriever.retrieve_full_context(qdrant_results, session)
+            context, web_link, title, top_document_id, score, page_numbers = await self.__retriever.retrieve_full_context(reranked_results, session)
 
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")

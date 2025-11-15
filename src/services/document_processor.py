@@ -145,7 +145,7 @@ def clean_text(text: str) -> str:
 
 def split_text_into_chunks(
     text: str, chunk_size: int = 200, overlap: int = 50, 
-    previous_overlap_sentences: list[str] = None
+    previous_overlap_paragraphs: list[str] = None
 ) -> tuple[list[str], list[str]]:
     """
     Splits the text into chunks of a specified token size with overlap.
@@ -154,7 +154,7 @@ def split_text_into_chunks(
     Overlap between chunks is also paragraph-based.
     """
     if not text:
-        return [], previous_overlap_sentences
+        return [], previous_overlap_paragraphs
 
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
@@ -168,58 +168,22 @@ def split_text_into_chunks(
             cleaned_paragraphs.append(cleaned_p)
 
     if not cleaned_paragraphs:
-        return [], previous_overlap_sentences
+        return [], previous_overlap_paragraphs
     
-    
-    docs_for_chunking = []
-    for p in cleaned_paragraphs:
-        sentences = nltk.sent_tokenize(p, language="russian") 
+    if previous_overlap_paragraphs is None:
+        previous_overlap_paragraphs = []
 
-        # Adjust sentences to merge short numbered items with the next sentence
-        adjusted_sentences = []
-        i = 0
-        while i < len(sentences):
-            current_sentence = sentences[i]
-            
-            # Check if the sentence is short and resembles a numbered item (e.g., "15.")
-            is_number_only = re.match(r'^\s*\d+\.\s*$', current_sentence)
-            
-            # Also check for overly short sentences (e.g., one or two words)
-            is_too_short = len(current_sentence.split()) <= 2
-            
-            if (is_number_only or is_too_short) and (i + 1 < len(sentences)):
-                # If it's a number item or too short, merge it with the next sentence.
-                sentences[i + 1] = current_sentence.strip() + ' ' + sentences[i + 1].strip()
-            else:
-                # Otherwise, add the sentence as is
-                adjusted_sentences.append(current_sentence.strip())
-            
-            i += 1
-            
-        sentences = adjusted_sentences
-        docs_for_chunking.extend(sentences)
-    
-    if previous_overlap_sentences is None:
-        previous_overlap_sentences = []
+    docs_for_chunking = previous_overlap_paragraphs + cleaned_paragraphs
 
-    if not docs_for_chunking:
-        return [], previous_overlap_sentences
-    
-    if previous_overlap_sentences is None:
-        previous_overlap_sentences = []
-
-    docs_for_chunking = previous_overlap_sentences + docs_for_chunking
-
-    # 3. Create chunks with greedy approach, using sentences as base units
+    # 3. Create chunks with greedy approach, using paragraphs as base units
     chunks = []
-    # current_sentences_in_chunk: list of sentences that make up the current chunk
-    current_sentences_in_chunk = [] 
+    current_paragraphs_in_chunk = []
     current_chunk_text = ""
     
-    for sentence in docs_for_chunking:
+    for paragraph in docs_for_chunking:
         
-        # 1. Check if the next sentence fits
-        next_chunk_text = current_chunk_text + ' ' + sentence if current_chunk_text else sentence
+        # 1. Check if the next paragraph fits
+        next_chunk_text = current_chunk_text + '\n\n' + paragraph if current_chunk_text else paragraph
         
         if len(tokenizer.encode(next_chunk_text)) > chunk_size:
             
@@ -227,59 +191,59 @@ def split_text_into_chunks(
             if current_chunk_text:
                 chunks.append(current_chunk_text.strip())
 
-            # 2. Form the overlap for the new chunk (50 tokens) from previous sentences
-            overlap_sentences = []
+            # 2. Form the overlap for the new chunk (50 tokens) from previous paragraphs
+            overlap_paragraphs = []
             overlap_tokens = 0
             
-            # Search backwards, taking sentences until at least 50 tokens are accumulated
-            for s in reversed(current_sentences_in_chunk):
-                s_tokens_count = len(tokenizer.encode(s))
+            # Search backwards, taking paragraphs until at least 50 tokens are accumulated
+            for p in reversed(current_paragraphs_in_chunk):
+                p_tokens_count = len(tokenizer.encode(p))
                 
-                # Condition: Adding this sentence to the overlap + the current sentence 
+                # Condition: Adding this paragraph to the overlap + the current paragraph
                 # must not exceed the chunk_size (200)
-                if overlap_tokens + s_tokens_count + len(tokenizer.encode(sentence)) <= chunk_size:
+                if overlap_tokens + p_tokens_count + len(tokenizer.encode(paragraph)) <= chunk_size:
                     
-                    overlap_sentences.insert(0, s) # Insert at the start to maintain order
-                    overlap_tokens += s_tokens_count
+                    overlap_paragraphs.insert(0, p) # Insert at the start to maintain order
+                    overlap_tokens += p_tokens_count
                     
                     # If the minimum overlap (50 tokens) is reached, stop to minimize duplication.
                     if overlap_tokens >= overlap:
                         break
                 
-            # 3. Start the new chunk with the overlap and add the current sentence
+            # 3. Start the new chunk with the overlap and add the current paragraph
             
-            # New sentences list: Overlap sentences + current sentence
-            new_chunk_sentences = overlap_sentences + [sentence]
+            # New paragraphs list: Overlap paragraphs + current paragraph
+            new_chunk_paragraphs = overlap_paragraphs + [paragraph]
             
             # Обновляем текущий текст чанка
-            current_chunk_text = " ".join(new_chunk_sentences).strip()
+            current_chunk_text = "\n\n".join(new_chunk_paragraphs).strip()
             
-            # Обновляем список предложений, составляющих новый чанк
-            current_sentences_in_chunk = new_chunk_sentences
+            # Обновляем список параграфов, составляющих новый чанк
+            current_paragraphs_in_chunk = new_chunk_paragraphs
 
         else:
-            # 4. Add the sentence to the current chunk
+            # 4. Add the paragraph to the current chunk
             current_chunk_text = next_chunk_text.strip()
-            current_sentences_in_chunk.append(sentence)
+            current_paragraphs_in_chunk.append(paragraph)
 
     # 5. Finalize the last chunk
     if current_chunk_text and (not chunks or current_chunk_text.strip() != chunks[-1].strip()):
         chunks.append(current_chunk_text.strip())
 
     # 6. Determine the tail (overlap for the next page)
-    tail_sentences = []
+    tail_paragraphs = []
     tail_tokens = 0
     
-    for s in reversed(current_sentences_in_chunk):
-        s_tokens_count = len(tokenizer.encode(s))
-        if tail_tokens + s_tokens_count <= chunk_size: 
-            tail_sentences.insert(0, s) 
-            tail_tokens += s_tokens_count
+    for p in reversed(current_paragraphs_in_chunk):
+        p_tokens_count = len(tokenizer.encode(p))
+        if tail_tokens + p_tokens_count <= chunk_size:
+            tail_paragraphs.insert(0, p)
+            tail_tokens += p_tokens_count
         
         if tail_tokens >= overlap:
             break
             
     logger.info(f'FLAGchunks {chunks}')
-    return chunks, tail_sentences
+    return chunks, tail_paragraphs
 
  
