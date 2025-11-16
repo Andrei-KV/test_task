@@ -17,6 +17,7 @@ COLLECTION_NAME = os.getenv('COLLECTION_NAME')
 
 # Embedding model configuration
 EMBEDDING_MODEL_NAME = os.getenv('EMBEDDING_MODEL_NAME')
+# RERANKER_MODEL_NAME = os.getenv('RERANKER_MODEL_NAME')
 
 # LLM configuration
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')

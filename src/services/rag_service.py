@@ -1,6 +1,6 @@
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import SearchParams
 import tiktoken
@@ -40,15 +40,16 @@ class QueryEmbeddingService:
         return query_embedding.tolist()[0]
     
 
-# Сервис семантического поиска
+# Semantic search in Qdrant
 class QueryQdrantClient:
     def __init__(self, host: str, collection_name: str):
-        # Инкапсуляция клиента и конфигурации
+
         self.__client = AsyncQdrantClient(url=host)
         self.__collection_name = collection_name
 
-    async def semantic_search(self, query_vector: list[float], limit_k: int = 6):
-        """Выполняет семантический поиск в Qdrant."""
+    async def semantic_search(self, query_vector: list[float], limit_k: int = 30):
+        """Выполняет семантический поиск в Qdrant.
+        Извлекааает большое количество векторов для уточнения и фильтрации на уровне контекста."""
         logger.info("Performing semantic search in Qdrant...")
         search_result = await self.__client.query_points(
             collection_name=self.__collection_name,
@@ -58,57 +59,118 @@ class QueryQdrantClient:
             with_vectors=False,
             search_params=SearchParams(
                 exact=False,
-                hnsw_ef=100
-            )
+                hnsw_ef=200
+            ),
+            score_threshold=0.7
         )
-        logger.info("Semantic search completed.")
-        return search_result.points
+        candidates = search_result.points
 
-# Извлечение контекста из БД PostgreSQL
+        logger.info(f"Found {len(candidates)} candidates. Starting reranking...")
+
+        if not candidates:
+            logger.warning("No candidates found in semantic search.")
+            return [], None, 0
+        
+        # 2: Giving document_id priority to the most relevant candidate
+        first_candidate_payload = candidates[0].payload
+        if not first_candidate_payload or 'document_id' not in first_candidate_payload:
+            logger.error("The most relevant candidate is missing 'document_id' in its payload.")
+            return [], None, 0
+        
+        max_score = candidates[0].score
+
+        target_document_id = first_candidate_payload['document_id']
+        logger.info(f"Most relevant document_id: {target_document_id}")
+
+        # 3: Select the top-4 relevant chunks from the same document_id
+        filtered_candidates = [
+            p for p in candidates 
+            if p.payload and p.payload.get('document_id') == target_document_id
+        ]
+
+        top_relevant_chunks = filtered_candidates[:4]
+        
+        if not top_relevant_chunks:
+            logger.warning(f"No relevant chunks found for document_id: {target_document_id}")
+            return [], None, 0
+            
+        logger.info(f"Selected {len(top_relevant_chunks)} top relevant chunks from target document.")
+
+        # 4: Collect chunk_ids of the top relevant chunks
+        target_chunk_ids = {p.payload['chunk_id'] for p in top_relevant_chunks if p.payload and 'chunk_id' in p.payload}
+        
+        if not target_chunk_ids:
+             logger.error("Selected chunks are missing 'chunk_id'.")
+             return [], None, 0
+
+        # 5: Request neighboring chunks (+1 and -1)
+        neighbor_chunk_ids = set()
+        for chunk_id in target_chunk_ids:
+            if chunk_id > 0:
+                neighbor_chunk_ids.add(chunk_id - 1)
+            neighbor_chunk_ids.add(chunk_id + 1)
+
+        # Collect all required chunk IDs
+        all_required_chunk_ids = target_chunk_ids.union(neighbor_chunk_ids)
+        logger.info(f"Total unique chunk_ids to retrieve (including neighbors): {len(all_required_chunk_ids)}")
+        
+        final_sorted_chunk_ids = sorted(list(all_required_chunk_ids))
+        
+        logger.info(f"Final list of {len(final_sorted_chunk_ids)} unique chunk_ids is ready: {final_sorted_chunk_ids}")
+        
+        return final_sorted_chunk_ids, target_document_id, max_score
+
+
+# Extact full context from PostgreSQL
 class ContextRetriever:
     """Инкапсулирует логику извлечения полного контекста из PostgreSQL."""
 
-    async def retrieve_full_context(self, qdrant_results, session: AsyncSession) -> tuple:
+    async def retrieve_full_context(self, qdrant_results, top_document_id, session: AsyncSession) -> tuple:
         """Извлекает полный текстовый контекст по результатам Qdrant."""
         logger.info("Retrieving full context from PostgreSQL...")
     
-        try:
-            top_document_id = qdrant_results[0].payload.get('document_id')
-        except (IndexError, KeyError):
+        if not qdrant_results or not top_document_id:
             logger.warning("No document ID found in Qdrant results.")
-            return " ", None, None, None, 0.0, []
+            return " ", None, None, None, []
 
-        relevant_chunk_ids = [
-            result.payload.get('chunk_id')
-            for result in qdrant_results
-            if result.payload.get('document_id') == top_document_id
-        ]
-        if not relevant_chunk_ids:
-            logger.warning("No relevant chunk IDs found.")
-            return " ", None, None, None, 0.0, []
-
+              
+        # Retrieve all chunks from database based on chunk IDs from Qdrant
         from sqlalchemy import select
         stmt = (
-            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number)
-           .join(Document)
-           .where(DocumentChunk.chunk_id.in_(relevant_chunk_ids))
-           .order_by(DocumentChunk.chunk_id)
+            select(DocumentChunk.content, Document.web_link, Document.title, DocumentChunk.page_number, DocumentChunk.chunk_id)
+            .join(Document)
+            .where(
+                Document.document_id == top_document_id,
+                DocumentChunk.chunk_id.in_(qdrant_results)
+            )
+            .order_by(DocumentChunk.chunk_id)  
         )
         sql_results = (await session.execute(stmt)).fetchall()
 
         if not sql_results:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
-            return " ", None, None, None, 0.0, []
+            return " ", None, None, None, []
 
-        full_context = [result.content for result in sql_results]
-        page_numbers = [result.page_number for result in sql_results]
+        # Collect unique chunks while preserving order
+        unique_chunks = []
+        for result in sql_results:
+            unique_chunks.append({
+                "content": result.content,
+                "page_number": result.page_number
+            })
+        
+        full_context = [unique_chunks[cid]['content'] for cid in qdrant_results]
+        page_numbers = [unique_chunks[cid]['page_number'] for cid in qdrant_results]
+        
         web_link = sql_results[0].web_link
         title = sql_results[0].title
-        context = "\n\n".join(full_context)
-        max_score = max([result.score for result in qdrant_results])
+        context = "\n".join(full_context)
+        
+        
         logger.info("Full context retrieved successfully.")
-        logger.debug(context[:500])
-        return context, web_link, title, top_document_id, max_score, page_numbers
+        logger.debug(f'Full context retrieved: {context}')
+        
+        return context, web_link, title, top_document_id, page_numbers
 
 
 class LLMGenerator:
@@ -142,6 +204,7 @@ class LLMGenerator:
         )
         if pages_str:
             final_system_prompt += f"**Страницы:** {pages_str}\n\n"
+        
         final_system_prompt += f"<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
 
         try:
@@ -166,21 +229,23 @@ class LLMGenerator:
                 config = GenerateContentConfig(
                     temperature=temperature,
                     top_p=0.75,
-                    max_output_tokens=1500,
-                    system_instruction=final_system_prompt, # Системный промпт отдельно
+                    max_output_tokens=2000,
+                    system_instruction=final_system_prompt, 
                 )
 
                 response = await self.__client.aio.models.generate_content(
                     model=self.__model_name,
-                    contents=user_query, # Запрос пользователя 
+                    contents=user_query,  
                     config=config
                 )
                 
-                result_content = response.text
-
+                
                 if not response:
                     logger.error("Error generating response: No response object.")
                     return 'Ошибка генерации ответа'
+                
+                result_content = response.text
+            
             logger.info(f"RAG response generated successfully: {response}")
             return result_content
             
@@ -284,12 +349,12 @@ class RAGService:
         query_vector = await self.__embedder.vectorize_query(user_query)
         
         # 2. Семантический поиск
-        qdrant_results = await self.__searcher.semantic_search(query_vector)
+        qdrant_results, top_document_id, max_score = await self.__searcher.semantic_search(query_vector)
 
         # 3. Извлечение контекста (управление транзакцией БД)
         async with self.__SessionLocal() as session:
-            context, web_link, title, top_document_id, score, page_numbers = await self.__retriever.retrieve_full_context(qdrant_results, session)
-
+            context, web_link, title, top_document_id, page_numbers = await self.__retriever.retrieve_full_context(qdrant_results, top_document_id, session)
+            score = max_score if max_score else 0.0
         if not context.strip():
             logger.warning("Context is empty, returning a default message.")
             # Используем NOT_FOUND_PROMPT из менеджера промптов
