@@ -159,8 +159,8 @@ class ContextRetriever:
                 "page_number": result.page_number
             })
         
-        full_context = [unique_chunks[cid]['content'] for cid in qdrant_results]
-        page_numbers = [unique_chunks[cid]['page_number'] for cid in qdrant_results]
+        full_context = [f'[Номер страницы: {u_c['page_number']}] ' + u_c['content']  for u_c in unique_chunks]
+        page_numbers = [u_c['page_number'] for u_c in unique_chunks]
         
         web_link = sql_results[0].web_link
         title = sql_results[0].title
@@ -188,7 +188,7 @@ class LLMGenerator:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
         # temperature = 0.6 if low_precision else 0.1
-        temperature = 0.2
+        temperature = 0.1
 
         # page_numbers may have duplicates, so we use a set to get unique page numbers
         unique_page_numbers = sorted(list(set(filter(None, page_numbers)))) if page_numbers else []
@@ -198,14 +198,15 @@ class LLMGenerator:
 
         # Формируем финальный системный промпт с информацией о документе
         final_system_prompt = (
-            f"{system_instructions}\n\n"
+
             f"**Название документа:** {title}\n"
             f"**Веб-ссылка на документ:** {web_link}\n"
         )
         if pages_str:
             final_system_prompt += f"**Страницы:** {pages_str}\n\n"
         
-        final_system_prompt += f"<КОНТЕКСТ>\n{context}\n</КОНТЕКСТ>"
+        final_system_prompt += f"<КОНТЕКСТ>:\n{context}\n<КОНТЕКСТ>"
+        final_system_prompt += f"\nНа основе предоставленного выше <КОНТЕКСТ> ответь на запрост пользователя: {user_query}"
 
         try:
             if self.__model_name == "deepseek-chat":
@@ -229,8 +230,8 @@ class LLMGenerator:
                 config = GenerateContentConfig(
                     temperature=temperature,
                     top_p=0.75,
-                    max_output_tokens=2000,
-                    system_instruction=final_system_prompt, 
+                    max_output_tokens=3000,
+                    system_instruction=system_instructions, 
                 )
 
                 response = await self.__client.aio.models.generate_content(
@@ -239,12 +240,16 @@ class LLMGenerator:
                     config=config
                 )
                 
-                
                 if not response:
                     logger.error("Error generating response: No response object.")
                     return 'Ошибка генерации ответа'
                 
                 result_content = response.text
+                usage = response.usage_metadata
+
+                logger.info(f"Токены ввода (Ваш запрос + контекст): {usage.prompt_token_count}")
+                logger.info(f"Токены вывода (Ответ модели): {usage.candidates_token_count}")
+                logger.info(f"Всего токенов: {usage.total_token_count}")
             
             logger.info(f"RAG response generated successfully: {response}")
             return result_content
@@ -277,7 +282,7 @@ class PromptManager:
                     ## 3. ТРЕБОВАНИЯ К СТРУКТУРЕ И ФОРМАТИРОВАНИЮ (Обязательно Markdown)
                     Твой ответ должен быть **сжатым, техническим и полным**. Стиль — сухой, фактологический.
 
-                    1.  **Начало Ответа (Итоговое Заключение):** Всегда начинай с краткого, выделенного жирным текстом **Итогового Заключения**, отвечающего на вопрос.
+                    1.  **Начало Ответа (Итоговое Заключение):** Всегда начинай с краткого, выделенного жирным текстом **Итогового Заключения**, отвечающего на вопрос на основе предоставленного контекста.
                     2.  **Детализация:**
                         * Используй **заголовки Markdown (`###`)** для логического деления.
                         * Все перечни, требования или шаги оформляй **нумерованным списком** (`1.`, `2.`).
@@ -293,18 +298,10 @@ class PromptManager:
                         * **Части Документа:** Перечисли **все** использованные части документа (Пункт, Секция, Глава).
                         * **Страницы:** Добавь отдельной строкой или маркированным списком **номера страниц**, которые содержали использованный текст. Если использовано несколько страниц, перечисли их, например, **Страницы: стр.15, стр. 22-23**.
                         * **Ссылка:** В конце секции размести веб-ссылку на полный документ.
-
+                    4. **СВЯЗЬ ВНУТРИ ТЕКСТА:** Если <КОНТЕКСТ> содержит прямую ссылку на пункт или раздел (например, **[3.1.2]** или **[Стр. 45]**), **включай этот номер/ссылку в скобках** в конец соответствующего предложения или элемента списка.
                     ## 5. КОНТРОЛЬ ДЛИНЫ
-                    Твой полный ответ (включая все заголовки и источники) **не должен превышать 750 токенов**. Используй лаконичный, технический стиль и списки для экономии.
-
-                    ## 6. ФОРМАТ АТРИБУЦИИ (Пример)
-                    ```markdown
-                    ---
-
-                    ### Использованные Источники (Атрибуция)
-                    * **Части документа:** Секция 2.1.3, Параграф 5.2.14, Глава 7.
-                    * **Страницы:** стр. 15, стр. 22-23
-                    * **Веб-ссылка на документ:** [ссылка отображается в виде кнопки]'''
+                    Твой полный ответ (включая все заголовки и источники) не должен обрываться. Используй лаконичный, технический стиль и списки для экономии. Если ответ получается слишком длинным, сократи его, сохраняя при этом все ключевые факты и источники.
+'''
         ),
         # Добавить другие ID документов и соответствующие инструкции
     }
@@ -367,8 +364,8 @@ class RAGService:
         # 4. Логика измерения и обрезки контекста
         tokenizer = tiktoken.get_encoding("cl100k_base")
         tokens = tokenizer.encode(context)
-        if len(tokens) > 1000:
-            context = tokenizer.decode(tokens[:1000])
+        # if len(tokens) > 1000:
+        #     context = tokenizer.decode(tokens[:1000])
         
         size_bytes = len(context.encode('utf-8'))
         size_mb = size_bytes / (1024 * 1024)

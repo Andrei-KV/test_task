@@ -65,6 +65,16 @@
                     linkButton.title = data.title; // Для всплывающей подсказки
 
                     content.appendChild(linkButton);
+
+                    // Если есть page_numbers, отображаем их
+                    if (data.page_numbers && data.page_numbers.length > 0) {
+                        var pagesSpan = document.createElement('span');
+                        pagesSpan.className = 'page-numbers';
+                        // Получаем уникальные и отсортированные номера страниц
+                        const uniquePages = [...new Set(data.page_numbers)].sort((a, b) => a - b);
+                        pagesSpan.textContent = `Страницы: ${uniquePages.join(', ')}`;
+                        content.appendChild(pagesSpan);
+                    }
                 }
             } catch (e) {
                 // Если не JSON, вставляем как обычный текст
