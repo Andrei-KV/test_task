@@ -4,6 +4,7 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import SearchParams, Filter, FieldCondition, MatchText
 import tiktoken
+import numpy as np
 from openai import AsyncOpenAI
 from ..database.database import AsyncSessionLocal
 from ..database.models import Document, DocumentChunk
@@ -48,6 +49,9 @@ class QueryQdrantClient:
         self.__collection_name = collection_name
         self.__cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
+    @staticmethod
+    def _sigmoid(x):
+        return 1 / (1 + np.exp(-x))
 
     
     async def semantic_search(self, query_vector: list[float], user_query: str, limit_k: int = 15):
@@ -122,7 +126,8 @@ class QueryQdrantClient:
         reranked_scores = await asyncio.to_thread(self.__cross_encoder.predict, rerank_pairs)
         
         # Assign new scores to candidates
-        for candidate, score in zip(candidates, reranked_scores):
+        normalized_scores = self._sigmoid(reranked_scores)
+        for candidate, score in zip(candidates, normalized_scores):
             candidate.score = score
         
         # Sort candidates by their new reranked score
@@ -373,8 +378,10 @@ class PromptManager:
                     ## 3. ПРАВИЛА RAG (АНТИ-ГАЛЛЮЦИНАЦИИ)
                     **ПРАВИЛО №3.1: ИСКЛЮЧИТЕЛЬНО КОНТЕКСТ.** Твой ответ должен быть основан **ТОЛЬКО** на фактах из блока `<КОНТЕКСТ>`.
                     **ПРАВИЛО №3.2: ЗАПРЕТ НА ВНЕШНИЕ ЗНАНИЯ.** Тебе **строго запрещено** использовать любые знания, полученные в ходе обучения, или делать предположения.
-                    **ПРАВИЛО №3.3: ОБРАБОТКА НЕХВАТКИ ДАННЫХ (ZERO-TOLERANCE).** Если ты **не можешь** дать полный, подтвержденный фактами ответ, используя исключительно `<КОНТЕКСТ>`, ты должен **немедленно прекратить** генерацию и вернуть **только** следующую фразу: **Точный ответ не найден. Пожалуйста, уточните или переформулируйте вопрос.** Тебе **строго запрещено** добавлять любые пояснения, частичные ответы или предложения по поиску, если ты не можешь полностью ответить на вопрос.
-                    **ПРАВИЛО №3.4: СИНТЕЗ (MULTI-HOP).** Если вопрос требует объединения фактов из разных частей `<КОНТЕКСТ>`, ты должен выполнить внутренний анализ (Chain-of-Thought) для **когерентного** синтеза. Сохраняй точность формулировок и **обязательно** указывай все использованные источники через инлайн-теги (Секция 5).
+                    **ПРАВИЛО №3.3: ОБРАБОТКА НЕХВАТКИ ДАННЫХ (FLEXIBLE RESPONSE).**
+    1. Если ты **не можешь** дать полный, подтвержденный фактами ответ, используя исключительно `<КОНТЕКСТ>`, ты должен начать ответ со **СТРОГОЙ** фразы: **ОТВЕТ НЕДОСТУПЕН В ПОЛНОМ ОБЪЕМЕ. Пожалуйста, уточните или переформулируйте вопрос, так как необходимая информация отсутствует в предоставленном контексте.**
+    2. **ПОСЛЕ** этой фразы тебе **разрешено** предложить дополнительный анализ или возможное направление поиска, используя данные из `<КОНТЕКСТ>`, но **не используя** внешние знания.
+                   **ПРАВИЛО №3.4: СИНТЕЗ (MULTI-HOP).** Если вопрос требует объединения фактов из разных частей `<КОНТЕКСТ>`, ты должен выполнить внутренний анализ (Chain-of-Thought) для **когерентного** синтеза. Сохраняй точность формулировок и **обязательно** указывай все использованные источники через инлайн-теги (Секция 5).
                     **ПРАВИЛО №3.5: ЯЗЫК ОТВЕТА. Отвечай всегда только на **русском языке**.
                     
                     ## 4. ТРЕБОВАНИЯ К СТРУКТУРЕ И ФОРМАТИРОВАНИЮ (Обязательно Markdown)
