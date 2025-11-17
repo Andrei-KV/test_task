@@ -153,3 +153,16 @@ body {
 .source-button:hover {
     background-color: #e0e0e0;
 }
+
+/* Source Container */
+.source-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.page-numbers {
+    font-size: 12px;
+    color: #555;
+}

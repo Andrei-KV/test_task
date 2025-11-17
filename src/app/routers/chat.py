@@ -31,9 +31,35 @@ async def websocket_endpoint(
             # Send "Processing..." message
             await manager.send_personal_message(text="Идёт обработка...", websocket=websocket)
 
-            context_window = await context_manager.get_context_window(client_id)
-            context_query = " ".join([msg["content"] for msg in context_window])
+            history = await context_manager.get_full_history(client_id)
+            context_query = ""
 
+            # The most recent message is the user's current input, which is at history[-1]
+            is_clarification_response = False
+            if len(history) >= 2:
+                if history[-2].get("role") == "bot" and "уточнить вопрос" in history[-2].get("content", ""):
+                    is_clarification_response = True
+            
+            if is_clarification_response:
+                # Find the user's original question (before the bot's clarification request)
+                original_question = ""
+                for message in reversed(history[:-2]):
+                    if message.get("role") == "user":
+                        original_question = message.get("content")
+                        break
+                
+                if original_question:
+                    # Combine original question with the user's new clarifying answer, excluding the bot's message
+                    context_query = f"{original_question} {data}"
+                else:
+                    # Fallback to just the current message if the original couldn't be found
+                    context_query = data
+            else:
+                # Default context window for new questions
+                context_window = await context_manager.get_context_window(client_id)
+                context_query = " ".join([msg["content"] for msg in context_window])
+            
+            logger.info(f'Context query: {context_query}')
             answer, web_link, score, title, page_numbers = await rag_service.aquery(context_query)
             logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
 

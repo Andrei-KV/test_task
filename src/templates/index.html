@@ -12,7 +12,7 @@
     <div id="chat-container">
         <div id="header">
             <img src="static/logo/g10.png" alt="DEWIAR AI Logo" width="48" height="53">
-            <h2>DEWIAR AI</h2>
+            <h2>DEMO AI</h2>
         </div>
         <ul id='messages'>
             </ul>
@@ -64,19 +64,22 @@
                     
                     linkButton.title = data.title; // Для всплывающей подсказки
 
-                    content.appendChild(linkButton);
+                    // Create a container for the button and page numbers
+                    var sourceContainer = document.createElement('div');
+                    sourceContainer.className = 'source-container';
+
+                    sourceContainer.appendChild(linkButton);
 
                     // Если есть page_numbers, отображаем их
-                    if (data.page_numbers && data.page_numbers.length > 0) {
-                        var pagesSpan = document.createElement('span');
-                        pagesSpan.className = 'page-numbers';
-                        // Получаем уникальные и отсортированные номера страниц
-                        const uniquePages = [...new Set(data.page_numbers)].sort((a, b) => a - b);
-                        pagesSpan.textContent = `Страницы: ${uniquePages.join(', ')}`;
-                        content.appendChild(pagesSpan);
-                    }
+                    // if (data.page_numbers.length > 0) {
+                    //     var pagesSpan = document.createElement('span');
+                    //     pagesSpan.className = 'page-numbers';
+                    //     pagesSpan.textContent = `Страницы: ${data.page_numbers}`;
+                    //     sourceContainer.appendChild(pagesSpan);
+                    // }
+                    content.appendChild(sourceContainer);
                 }
-            } catch (e) {
+            } catch (e)  {
                 // Если не JSON, вставляем как обычный текст
                 content.innerHTML = event.data;
             }
