@@ -81,3 +81,36 @@ poetry install
 ```bash
 poetry run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+## Управление данными
+
+Для управления документами в базе данных можно использовать следующие скрипты. Команды следует выполнять, когда контейнеры запущены.
+
+### Добавление новых документов
+
+Скрипт `process_new_documents_test.py` сканирует определенную папку (например, на Google Drive) и обрабатывает новые документы, добавляя их в базу данных.
+
+Чтобы запустить его, выполните:
+
+```bash
+sudo docker compose exec app python process_new_documents_test.py
+```
+
+### Удаление определенного документа
+
+Вы можете удалить документ и все связанные с ним данные по его ID.
+
+```bash
+sudo docker compose exec app python delete_document.py <document_id>
+```
+Замените `<document_id>` на ID документа, который вы хотите удалить.
+
+### Полная очистка баз данных
+
+Скрипт `clear_databases.py` полностью удаляет все данные из таблиц PostgreSQL и коллекции Qdrant.
+
+**Внимание:** Эта операция необратима.
+
+```bash
+sudo docker compose exec app python clear_databases.py
+```
