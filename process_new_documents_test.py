@@ -143,7 +143,7 @@ async def process_new_documents():
                 # cleaned_content = clean_text(page_content)
                 chunks, current_tail = split_text_into_chunks(
                     page_content, 
-                    chunk_size=500, 
+                    chunk_size=350, 
                     overlap=50,
                     previous_overlap_sentences=previous_overlap_sentences # tail prev page
                 )

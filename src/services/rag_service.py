@@ -57,12 +57,11 @@ class QueryQdrantClient:
         self.__cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
     @staticmethod
-    def _softmax(x):
-        e_x = np.exp(x - np.max(x))
-        return e_x / e_x.sum(axis=0)
+    def _sigmoid(x):
+        return 1 / (1 + np.exp(-x))
 
     
-    async def semantic_search(self, query_vector: list[float], user_query: str, limit_k: int = 30):
+    async def semantic_search(self, query_vector: list[float], user_query: str, limit_k: int = 20):
         """Performs a true hybrid search in Qdrant by combining results from separate vector and full-text queries."""
         logger.info("Performing hybrid search in Qdrant...")
 
@@ -73,129 +72,112 @@ class QueryQdrantClient:
             limit=limit_k,
             with_payload=True,
             with_vectors=False,
-            score_threshold=0.5,
+            score_threshold=0.3,
             search_params=SearchParams(
                 hnsw_ef=200
             )
         )
         vector_candidates = vector_search_result.points
-        if not vector_candidates:
-            logger.warning("Vector search returned no candidates. Aborting.")
-            return [], None, 0
-        
-        max_score = vector_candidates[0].score if vector_candidates else 0
-        logger.info(f"Vector search found {len(vector_candidates)} candidates. Max score: {max_score:.4f}")
-
-        # 2. Identify the top document ID from the most relevant chunk
-        top_candidate = vector_candidates[0]
-        if not top_candidate.payload or "document_id" not in top_candidate.payload:
-            logger.error(
-                "Top vector candidate is missing 'document_id'. Aborting."
-            )
-            return [], None, 0
-        
-        target_document_id = int(top_candidate.payload["document_id"])
-        logger.info(f"Top document identified: document_id='{target_document_id}'")
-
-        # # 2. Perform full-text search
-        # user_query_words = user_query.lower().split()
-        # logger.info(f"Executing full-text search with filter: document_id='{target_document_id}', words={user_query_words}")
-       
-        # text_search_result, _ = await self.__client.scroll(
-        #     collection_name=self.__collection_name,
-        #     scroll_filter=Filter(
-        #         must= [
-        #             FieldCondition(
-        #                 key="document_id",
-        #                 match=MatchValue(value=target_document_id),
-        #             ),
-        #             FieldCondition(
-        #                 key="content",
-        #                 match=MatchAny(any=user_query_words),
-        #             ),
-        #         ]
-        #     ),
-        #     limit=limit_k,
-        #     with_payload=True,
-        #     with_vectors=False,
-        # )
-        # text_candidates = text_search_result
-        # logger.info(
-        #     f"Full-text search found {len(text_candidates)} candidates within document '{target_document_id}'."
-        # )
-        
+        logger.info(f"Vector search found {len(vector_candidates)} candidates.")
+        logger.debug(f"Vector search candidate IDs: {[c.id for c in vector_candidates]}")
+        max_score = vector_search_result.points[0].score if vector_search_result.points else 0
+        # 2. Perform full-text search
+        text_search_result, _ = await self.__client.scroll(
+            collection_name=self.__collection_name,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="content",
+                        match=MatchText(text=user_query),
+                    )
+                ]
+            ),
+            limit=limit_k,
+            with_payload=True,
+            with_vectors=False,
+        )
+        text_candidates = text_search_result
+        logger.info(f"Full-text search found {len(text_candidates)} candidates.")
+        logger.debug(f"Full-text search candidate IDs: {[c.id for c in text_candidates]}")
 
         # 3. Combine and deduplicate results
-        combined_candidates = {
-            c.id: c
-            for c in vector_candidates
-            if c.payload and c.payload.get("document_id") == target_document_id
-        }
-
-        # for candidate in text_candidates:
-        #     combined_candidates[candidate.id] = candidate
+        combined_candidates = {candidate.id: candidate for candidate in vector_candidates}
+        for candidate in text_candidates:
+            if candidate.id not in combined_candidates:
+                combined_candidates[candidate.id] = candidate
         
         candidates = list(combined_candidates.values())
-        logger.info(
-            f"Found {len(candidates)} unique candidates from document '{target_document_id}'. Starting reranking..."
-        )
+        logger.info(f"Found {len(candidates)} unique candidates after combining. Starting reranking...")
         
         if not candidates:
-            logger.warning("No candidates to rerank.")
+            logger.warning("No candidates found from either search method.")
             return [], None, 0
         
         # 4. Rerank the combined candidates
         # Filter out candidates without 'content' in payload to prevent KeyError
-        rerank_pairs = [
-            [user_query, candidate.payload["content"]]
-            for candidate in candidates
-            if candidate.payload and "content" in candidate.payload
-        ]
-        if not rerank_pairs:
-            logger.warning(
-                "No valid candidates for reranking after content check."
-            )
+        valid_candidates = []
+        for candidate in candidates:
+            if candidate.payload and 'content' in candidate.payload:
+                valid_candidates.append(candidate)
+            else:
+                logger.warning(f"Skipping candidate {candidate.id} due to missing 'content' in payload.")
+        
+        if not valid_candidates:
+            logger.warning("No valid candidates left after filtering for content.")
             return [], None, 0
             
-        reranked_scores = await asyncio.to_thread(
-            self.__cross_encoder.predict, rerank_pairs
-        )
-        # Normalize scores and assign them to candidates
-        normalized_scores = self._softmax(reranked_scores)
+        candidates = valid_candidates
+        # The cross-encoder requires a list of [query, passage] pairs
+        rerank_pairs = [[user_query, candidate.payload['content']] for candidate in candidates]
+        logger.debug(f"Reranking {len(rerank_pairs)} pairs.")
+        reranked_scores = await asyncio.to_thread(self.__cross_encoder.predict, rerank_pairs)
+        
+        # Assign new scores to candidates
+        normalized_scores = self._sigmoid(reranked_scores)
         for candidate, score in zip(candidates, normalized_scores):
             candidate.score = score
         
-        # Sort by the new reranked score
+        # Sort candidates by their new reranked score
         candidates.sort(key=lambda x: x.score, reverse=True)
+        
+        logger.debug(f"Top 8 candidates after reranking:")
+        for i, candidate in enumerate(candidates[:12]):
+            logger.debug(f"{i+1}. ID: {candidate.id}, Score: {candidate.score:.4f}, DocID: {candidate.payload.get('document_id')}")
+        
+        # 2: Giving document_id priority to the most relevant candidate
+        first_candidate_payload = candidates[0].payload
+        if not first_candidate_payload or 'document_id' not in first_candidate_payload:
+            logger.error("The most relevant candidate is missing 'document_id' in its payload.")
+            return [], None, 0
+        
+       
 
-  
-        # 6. Select the top N chunks for the final context
-        top_relevant_chunks = candidates[:5]
-        target_chunk_ids = [
-            p.payload["chunk_id"]
-            for p in top_relevant_chunks
-            if p.payload and "chunk_id" in p.payload
+        target_document_id = first_candidate_payload['document_id']
+        logger.info(f"Most relevant document_id: {target_document_id}")
+
+        # 3: Select the top relevant chunks from the same document_id
+        filtered_candidates = [
+            p for p in candidates 
+            if p.payload and p.payload.get('document_id') == target_document_id
         ]
+
+        top_relevant_chunks = filtered_candidates[:8]
+        logger.info(f"top_relevant_chunks: {top_relevant_chunks[:8]}")
+
+        if not top_relevant_chunks:
+            logger.warning(f"No relevant chunks found for document_id: {target_document_id}")
+            return [], None, 0
+            
+        logger.info(f"Selected {len(top_relevant_chunks)} top relevant chunks from target document.")
+
+        # 4: Collect chunk_ids of the top relevant chunks
+        target_chunk_ids = {p.payload['chunk_id'] for p in top_relevant_chunks if p.payload and 'chunk_id' in p.payload}
+        
         if not target_chunk_ids:
             logger.error("Selected chunks are missing 'chunk_id'.")
             return [], None, 0
         
-        # # 7: Request neighboring chunks (+1 and -1)
-        # neighbor_chunk_ids = set()
-        # for chunk_id in target_chunk_ids:
-        #     if chunk_id > 0:
-        #         neighbor_chunk_ids.add(chunk_id - 1)
-        #     neighbor_chunk_ids.add(chunk_id + 1)
-
-        # # Collect all required chunk IDs
-        # all_required_chunk_ids = target_chunk_ids.union(neighbor_chunk_ids)
-        # logger.info(f"Total unique chunk_ids to retrieve (including neighbors): {len(all_required_chunk_ids)}")
-        
-        # final_sorted_chunk_ids = sorted(list(all_required_chunk_ids))
-        
-        # logger.info(f"Final list of {len(final_sorted_chunk_ids)} unique chunk_ids is ready: {final_sorted_chunk_ids}")
-        
-        return target_chunk_ids, target_document_id, max_score
+        return sorted(list(target_chunk_ids)), target_document_id, max_score
 
 
 # Extact full context from PostgreSQL
@@ -321,7 +303,7 @@ class LLMGenerator:
     async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
-        temperature = 0.5 if low_precision else 0.1
+        temperature = 0.5 if low_precision else 0.2
         # temperature = 0.1
 
         # Формируем финальный системный промпт с информацией о документе
@@ -454,7 +436,7 @@ class PromptManager:
 
 ## 🛡️ ПРАВИЛА RAG (АНТИ-ГАЛЛЮЦИНАЦИИ)
 **ПРАВИЛО №1: ИСКЛЮЧИТЕЛЬНО КОНТЕКСТ.** Твой ответ должен быть основан **ТОЛЬКО** на фактах из блока `<КОНТЕКСТ>`. **Строго запрещено** использовать любые внешние знания, делать предположения или использовать информацию, не подтвержденную контекстом.
-
+* Если в предоставленном КОНТЕКСТЕ отсутствует информация, необходимая для точного ответа, ты **ОБЯЗАН** следовать Правилу №2.
 **ПРАВИЛО №2: ОБРАБОТКА НЕХВАТКИ ДАННЫХ.** Если ты **не можешь** дать полный, подтвержденный фактами ответ, используя исключительно `<КОНТЕКСТ>`, ты **ОБЯЗАН** начать ответ со **СТРОГОЙ** фразы:
 **ОТВЕТ может быть неточным. Необходимо уточнить вопрос. [стр.X]**
 *(После этой фразы тебе разрешено предложить краткий анализ, используя **только** доступные данные из `<КОНТЕКСТ>`, но **без** внешних знаний.)*

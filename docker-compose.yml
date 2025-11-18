@@ -61,6 +61,25 @@ services:
       timeout: 5s
       retries: 5
 
+# ----------------------------------------------------------------
+  # 4. FastAPI App Service (Основное приложение)
+  # ----------------------------------------------------------------
+  app:
+    build: .
+    container_name: legal_rag_app
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   qdrant_data:

@@ -63,9 +63,9 @@ async def websocket_endpoint(
             answer, web_link, score, title, page_numbers = await rag_service.aquery(context_query)
             logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
 
-            if score < 0.7:
+            if score < 0.74:
                 clarification_count = await context_manager.get_clarification_count(client_id)
-                if clarification_count < 2:
+                if clarification_count < 1:
                     await context_manager.increment_clarification_count(client_id)
                     clarification_question = "Не могли бы вы уточнить вопрос?"
                     await context_manager.add_message(client_id, "bot", clarification_question)
