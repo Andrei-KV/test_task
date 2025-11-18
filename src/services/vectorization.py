@@ -47,14 +47,31 @@ class QdrantClientWrapper:
     def ensure_collection_exists(self, vector_dimension: int):
         """Создает коллекцию, если она не существует."""
         try:
-            if not self.__client.collection_exists(collection_name=self.__collection_name):
+            if not self.__client.collection_exists(
+                collection_name=self.__collection_name
+            ):
                 self.__client.create_collection(
                     collection_name=self.__collection_name,
-                    vectors_config=VectorParams(size=vector_dimension, distance=Distance.COSINE), 
+                    vectors_config=VectorParams(
+                        size=vector_dimension, distance=Distance.COSINE
+                    ),
                 )
-                logger.info(f"✅ Collection '{self.__collection_name}' created.")
+                self.__client.create_payload_index(
+                    collection_name=self.__collection_name,
+                    field_name="content",
+                    field_schema=TextIndexParams(
+                        type="text",
+                        tokenizer=TokenizerType.WORD,
+                        lowercase=True,
+                    ),
+                )
+                logger.info(
+                    f"✅ Collection '{self.__collection_name}' created with full-text index."
+                )
             else:
-                logger.info(f"✅ Collection '{self.__collection_name}' already exists.")
+                logger.info(
+                    f"✅ Collection '{self.__collection_name}' already exists."
+                )
         except Exception as e:
             logger.error(f"❌ Qdrant error: {e}. Make sure Qdrant is running.")
 
