@@ -1,56 +1,31 @@
-import multiprocessing
-import schedule
-import time
-import logging
-from telegram_bot.bot import bot  # Явный импорт
-from google_drive_listener import process_new_documents
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from src.app.routers import chat
+import uvicorn
+from src.app import logging_config
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+app = FastAPI(title="RAG Chatbot")
+
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
+
+templates = Jinja2Templates(directory="src/templates")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-logger = logging.getLogger(__name__)
 
-def run_bot():
-    """Запускает Telegram-бота с обработкой ошибок."""
-    logger.info("Starting the Telegram bot process...")
-    try:
-        print("🚀 Telegram bot is starting...")
-        bot.polling(none_stop=True)
-    except Exception as e:
-        logger.critical(f"Bot process failed with a critical error: {e}", exc_info=True)
-        print(f"❌ Critical error in bot process: {e}")
 
-def run_listener():
-    """Запускает слушателя Google Drive с обработкой ошибок."""
-    logger.info("Starting the Google Drive listener process...")
-    try:
-        print("🔄 Starting the Google Drive listener...")
-        process_new_documents()
-        schedule.every(1).minutes.do(process_new_documents)
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
-    except Exception as e:
-        logger.critical(f"Listener process failed with a critical error: {e}", exc_info=True)
-        print(f"❌ Critical error in listener process: {e}")
+@app.get("/")
+async def get(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+app.include_router(chat.router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    logger.info("Initializing application processes...")
-    
-    # Создаем процессы
-    bot_process = multiprocessing.Process(target=run_bot)
-    listener_process = multiprocessing.Process(target=run_listener)
-
-    # Запускаем процессы
-    bot_process.start()
-    listener_process.start()
-
-    logger.info("Both processes have been started.")
-
-    # Ожидаем завершения процессов
-    bot_process.join()
-    listener_process.join()
-
-    logger.info("Application has shut down.")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,168 @@
+/* General Body Styles */
+body {
+    background-color: #F5F5F5;
+    font-family: 'Inter', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+#chat-container {
+    width: 80%;
+    max-width: 1161px;
+    height: 90vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    background-color: #F5F5F5;
+    box-shadow: 0 0 20px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+/* Header */
+#header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 25px;
+    gap: 15px; /* Reduced from 30px */
+}
+
+#header h2 {
+    color: #013237;
+    font-weight: 600;
+}
+
+/* Messages Area */
+#messages {
+    flex-grow: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.message {
+    display: flex;
+    max-width: 60%;
+}
+
+.user-message {
+    align-self: flex-end;
+    justify-content: flex-end;
+}
+
+.bot-message {
+    align-self: flex-start;
+}
+
+.message-content {
+    padding: 15px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.user-message .message-content {
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    color: #1E1E1E;
+}
+
+.bot-message .message-content {
+    background: #FFFFFF; /* The screenshot shows both as white */
+    border: 1px solid #E0E0E0;
+    color: #1E1E1E;
+}
+
+/* Input Form */
+#form {
+    display: flex;
+    padding: 20px;
+    margin: 20px;
+    background: #FAFFFD;
+    border: 1px solid #4FD1C5;
+    border-radius: 16px;
+    position: relative;
+}
+
+#messageText {
+    flex-grow: 1;
+    border: none;
+    background: transparent;
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    color: #013237;
+    padding: 10px;
+    padding-right: 80px; /* Make space for the counter */
+}
+
+#messageText:focus {
+    outline: none;
+}
+
+#messageText::placeholder {
+    color: #013237;
+    opacity: 0.6;
+}
+
+#char-counter {
+    position: absolute;
+    bottom: 15px;
+    right: 150px; /* Adjust as needed */
+    font-size: 12px;
+    color: #013237;
+    opacity: 0.6;
+}
+
+
+#form button {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 50px;
+    height: 50px;
+    background: #4FD1C5;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    color: #1E1E1E; /* From Vector background */
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+/* Source Button */
+.source-button {
+    display: inline-block;
+    background-color: #f0f0f0;
+    color: #333;
+    padding: 8px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    margin-top: 10px;
+    max-width: 200px; /* Fixed width */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid #ccc;
+}
+
+.source-button:hover {
+    background-color: #e0e0e0;
+}
+
+/* Source Container */
+.source-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.page-numbers {
+    font-size: 12px;
+    color: #555;
+}
