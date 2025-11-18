@@ -15,7 +15,7 @@ class ContextManagerService:
         history = await self._redis.get_history(session_id)
         return history[-limit:]
 
-    async def get_context_window(self, session_id: str, window_size: int = 3) -> List[dict]:
+    async def get_context_window(self, session_id: str, window_size: int = 5) -> List[dict]:
         """
         Retrieves the last few messages to be used as context for the RAG service.
         """

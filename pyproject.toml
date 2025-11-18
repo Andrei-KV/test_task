@@ -6,13 +6,11 @@ authors = [
     {name = "Andrei-KV",email = "a.v.kovalev9@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12,<4.0.0"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "sqlalchemy (>=2.0.44,<3.0.0)",
     "langchain-text-splitters (>=1.0.0,<2.0.0)",
-    "pytelegrambotapi (>=4.29.1,<5.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    "schedule (>=1.2.2,<2.0.0)",
     "markdown (>=3.9,<4.0)",
     "pypandoc (>=1.15,<2.0)",
     "beautifulsoup4 (>=4.14.2,<5.0.0)",
@@ -29,10 +27,24 @@ dependencies = [
     "pandas (>=2.3.3,<3.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
     "xlrd (>=2.0.2,<3.0.0)",
-    "unstructured[all-docs] (>=0.18.18,<0.19.0)",
+    "google-api-python-client (>=2.187.0,<3.0.0)",
+    "transformers (>=4.57.1,<5.0.0)",
+    "torch (>=2.9.1,<3.0.0)",
+    "numpy (>=2.3.5,<3.0.0)",
+    "fastapi (>=0.121.2,<0.122.0)",
+    "uvicorn (>=0.38.0,<0.39.0)",
+    "scipy (>=1.16.3,<2.0.0)",
+    "grpcio (>=1.76.0,<2.0.0)",
+    "qdrant-client (>=1.16.0,<2.0.0)",
+    "sentence-transformers (>=5.1.2,<6.0.0)",
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "deptry (>=0.24.0,<0.25.0)"
+]

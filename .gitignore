@@ -7,7 +7,7 @@ draft.txt
 test_file.py
 clear_qdrant.py
 google_drive_listener.py
-clear_databases.py
+
 update_database.py
 pages_test.txt
 chunks_test2.txt
@@ -19,12 +19,9 @@ test_websocket_manager.py
 test_chat.py
 test_document_processor.py
 test_rag_service.py
-ISI.pdf
-ISI.doc
+
 app.log.*
 app.log*
 
-pages_test_fitz.txt
-prikaz_mintransa_rossii_ot_23.06.2022_n_250.pdf
 
-.+3%M_gn2H9yiYb
+
