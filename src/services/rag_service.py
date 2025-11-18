@@ -2,7 +2,13 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.http.models import SearchParams, Filter, FieldCondition, MatchText
+from qdrant_client.http.models import (
+    SearchParams,
+    Filter,
+    FieldCondition,
+    MatchText,
+    MatchAny,
+)
 import tiktoken
 import numpy as np
 from openai import AsyncOpenAI
@@ -54,7 +60,7 @@ class QueryQdrantClient:
         return 1 / (1 + np.exp(-x))
 
     
-    async def semantic_search(self, query_vector: list[float], user_query: str, limit_k: int = 15):
+    async def semantic_search(self, query_vector: list[float], user_query: str, limit_k: int = 30):
         """Performs a true hybrid search in Qdrant by combining results from separate vector and full-text queries."""
         logger.info("Performing hybrid search in Qdrant...")
 
@@ -75,13 +81,14 @@ class QueryQdrantClient:
         logger.debug(f"Vector search candidate IDs: {[c.id for c in vector_candidates]}")
 
         # 2. Perform full-text search
+        user_query_words = user_query.lower().split()
         text_search_result, _ = await self.__client.scroll(
             collection_name=self.__collection_name,
             scroll_filter=Filter(
                 must=[
                     FieldCondition(
                         key="content",
-                        match=MatchText(text=user_query),
+                        match=MatchAny(any=user_query_words),
                     )
                 ]
             ),
@@ -134,7 +141,7 @@ class QueryQdrantClient:
         candidates.sort(key=lambda x: x.score, reverse=True)
         
         logger.debug(f"Top 5 candidates after reranking:")
-        for i, candidate in enumerate(candidates[:5]):
+        for i, candidate in enumerate(candidates[:6]):
             logger.debug(f"{i+1}. ID: {candidate.id}, Score: {candidate.score:.4f}, DocID: {candidate.payload.get('document_id')}")
         
         # 2: Giving document_id priority to the most relevant candidate
@@ -154,8 +161,8 @@ class QueryQdrantClient:
             if p.payload and p.payload.get('document_id') == target_document_id
         ]
 
-        top_relevant_chunks = filtered_candidates[:5]
-        logger.info(f"top_relevant_chunks: {top_relevant_chunks[:5]}")
+        top_relevant_chunks = filtered_candidates[:6]
+        logger.info(f"top_relevant_chunks: {top_relevant_chunks[:6]}")
 
         if not top_relevant_chunks:
             logger.warning(f"No relevant chunks found for document_id: {target_document_id}")
@@ -296,18 +303,19 @@ class LLMGenerator:
     async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
-        temperature = 0.5 if low_precision else 0.2
-        # temperature = 0.2
+        # temperature = 0.5 if low_precision else 0.2
+        temperature = 0.1
 
         # Формируем финальный системный промпт с информацией о документе
-        final_system_prompt = (
+        # final_system_prompt = (
 
-            f"**Название документа:** {title}\n"
-            f"**Веб-ссылка на документ:** {web_link}\n"
-        )
+        #     f"**Название документа:** {title}\n"
+        #     f"**Веб-ссылка на документ:** {web_link}\n"
+        # )
 
-        final_system_prompt += f"<КОНТЕКСТ>:\n{context}\n<КОНТЕКСТ>"
+        final_system_prompt = f"<КОНТЕКСТ>:\n{context}\n<КОНТЕКСТ>"
         final_system_prompt +=  f"Если в `<КОНТЕКСТ>` источник указан в формате **[стр.X]**, ты должен вставлять тег `[стр.X]` **непосредственно** после предложения или элемента списка, который ты использовал."
+        final_system_prompt += f"Обязательно указывай номера пунктов или страниц, откуда взята информация внутри []."
         final_system_prompt += f"\nНа основе предоставленного выше <КОНТЕКСТ> ответь на запрост пользователя: {user_query}"
 
         try:
@@ -406,6 +414,17 @@ class PromptManager:
                     * Если в конце блока <КОНТЕКСТ> есть тег `[ОГРАНИЧЕНИЕ ПО ТОКЕНАМ]`, это означает, что контекст был усечен из-за ограничения по токенам. В этом случае **ОБЯЗАТЕЛЬНО** в конце ответа добавь '...' и укажи в скобках, что ответ может быть неполным из-за ограниченя длины ответа.
                     '''
         ),
+        "ID_GEMINI_2.5_FLASH_EXAMPLE": ('''Ты — ИИ-ассистент для ответов на вопросы по документам.
+Твоя задача — отвечать на вопросы пользователя, основываясь **исключительно** на предоставленном тексте.
+Не добавляй никакой информации, которой нет в тексте.
+Если ответ в тексте не найден, так и напиши: «Необходимо уточнить вопрос».
+
+**Правила цитирования:**
+- В конце каждого предложения или пункта списка, который основан на предоставленном тексте, обязательно указывай страницу в формате `[стр. X]`.
+- Всегда начинай ответ с краткого итогового заключения, выделенного жирным шрифтом.
+- Используй Markdown для форматирования: заголовки (`###`), списки (`1.`, `2.`), жирный шрифт (`**слово**`).
+- Стиль ответа — сжатый и технический, без вводных фраз.
+'''),
         # Добавить другие ID документов и соответствующие инструкции
     }
  
@@ -415,10 +434,10 @@ class PromptManager:
 
     def get_instructions_by_document_id(self, document_id: str) -> str:
         """Возвращает системные инструкции для заданного ID документа."""
-        
+        ID_DEFAULT = "ID_DEFAULT" if LLM_MODEL == "deepseek-chat" else "ID_GEMINI_2.5_FLASH_EXAMPLE"
         # Используем.get() для безопасного извлечения. Если ID не найден, 
         # возвращаем дефолтный промпт.
-        return self.PROMPT_MAPPING.get(document_id, 'ID_DEFAULT')
+        return self.PROMPT_MAPPING.get(document_id,  ID_DEFAULT)
 
     def get_not_found_message(self):
          return self.NOT_FOUND_PROMPT

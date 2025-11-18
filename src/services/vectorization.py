@@ -1,7 +1,13 @@
 from concurrent.futures import ProcessPoolExecutor
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from qdrant_client.http.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    TextIndexParams,
+    TokenizerType,
+)
 from src.config import QDRANT_HOST, COLLECTION_NAME, EMBEDDING_MODEL_NAME
 from uuid import uuid4
 from src.app.logging_config import get_logger

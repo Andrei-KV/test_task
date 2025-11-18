@@ -71,27 +71,72 @@ def parse_pdf(content: bytes) -> list[tuple[str, int]]:
 
     return text_by_page
 
-def parse_docx(content) -> list[tuple[str, int]]:
-    """Parses a .docx file and returns its text content."""
-    result = docx2python(BytesIO(content))
-    
-    # Text grouped by page
-    text_by_page = []
-    
-    # Iterate over pages
-    for page in result.body:
-        page_text = ""
-        # Iterate over paragraphs on page
-        for paragraph in page:
-            page_text += paragraph.text + "\n"
-        # Add page text and page number
-        text_by_page.append((page_text, page.page_num))
+def parse_docx(content: bytes) -> list[tuple[str, int]]:
+    """
+    Parses a .docx file by first converting it to PDF to ensure accurate page numbering,
+    then processes the resulting PDF.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+            temp_pdf_path = temp_pdf.name
         
-    return text_by_page
+        pypandoc.convert_text(content, 'pdf', format='doc', outputfile=temp_pdf_path, extra_args=['--pdf-engine=xelatex'])
+        
+        with open(temp_pdf_path, "rb") as f:
+            pdf_content = f.read()
+            
+        os.remove(temp_pdf_path)
+        
+        return parse_pdf(pdf_content)
+    except OSError as e:
+        logger.error(f"Error converting .docx to PDF. Pandoc and a LaTeX engine (e.g., TeX Live) must be installed. Error: {e}")
+        logger.warning("Falling back to legacy docx2python parser for .docx file. Page numbers may be inaccurate.")
+        # Fallback to the old method if pandoc fails
+        try:
+            result = docx2python(BytesIO(content))
+            text_by_page = []
+            for page in result.body:
+                page_text = ""
+                for paragraph in page:
+                    page_text += paragraph.text + "\n"
+                text_by_page.append((page_text, page.page_num))
+            return text_by_page
+        except Exception as fallback_e:
+            logger.error(f"Fallback .docx parsing with docx2python also failed: {fallback_e}")
+            return []
 
-def parse_doc(content) -> list[tuple[str, int | None]]:
-    """Parses a .doc file and returns its text content."""
-    return [(pypandoc.convert_text(content, 'plain', format='doc'), None)]
+
+def parse_doc(content: bytes) -> list[tuple[str, int]]:
+    """
+    Parses a .doc file by first trying to convert it as DOCX, then as RTF,
+    to handle different .doc format variations.
+    """
+    try:
+        # Try parsing as DOCX first
+        return parse_doc_or_rtf(content, 'docx')
+    except Exception as e:
+        logger.warning(f"Failed to parse .doc as DOCX: {e}. Trying as RTF.")
+        try:
+            # Fallback to parsing as RTF
+            return parse_doc_or_rtf(content, 'rtf')
+        except Exception as e2:
+            logger.error(f"Failed to parse .doc as both DOCX and RTF: {e2}")
+            return []
+
+def parse_doc_or_rtf(content: bytes, file_format: str) -> list[tuple[str, int]]:
+    """Helper function to convert DOCX or RTF to PDF."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+        temp_pdf_path = temp_pdf.name
+    
+    pypandoc.convert_text(content, 'pdf', format=file_format, outputfile=temp_pdf_path, extra_args=['--pdf-engine=xelatex'])
+    
+    with open(temp_pdf_path, "rb") as f:
+        pdf_content = f.read()
+        
+    os.remove(temp_pdf_path)
+    
+    return parse_pdf(pdf_content)
+
 
 def parse_rtf(content) -> list[tuple[str, int | None]]:
     """Parses an .rtf file and returns its text content."""

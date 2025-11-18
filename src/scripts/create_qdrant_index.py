@@ -14,7 +14,7 @@ async def create_full_text_index():
             field_name="content",
             field_schema=TextIndexParams(
                 type="text",
-                tokenizer=TokenizerType.WHITESPACE,
+                tokenizer=TokenizerType.WORD,
                 lowercase=True
             )
         )
