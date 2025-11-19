@@ -15,7 +15,7 @@ COPY pyproject.toml poetry.lock ./
 
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
-    poetry install --only main --no-root --with pytorch-cpu
+    poetry install --only main --no-root
 
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
