@@ -54,7 +54,11 @@ class QueryQdrantClient:
 
         self.__client = AsyncQdrantClient(url=host, timeout=60)
         self.__collection_name = collection_name
-        self.__cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+        self.__client = AsyncQdrantClient(url=host, timeout=60)
+        self.__collection_name = collection_name
+        # Check if CrossEncoder is already loaded
+        if not hasattr(self, '_QueryQdrantClient__cross_encoder'):
+             self.__cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
     @staticmethod
     def _sigmoid(x):
@@ -202,23 +206,10 @@ class ContextRetriever:
             if chunk_id > 0:
                 all_required_chunk_ids.add(chunk_id - 1)
 
-        # 2: Add succeeding neighbors with condition
+        # 2: Add succeeding neighbors (optimistic approach: fetch +2 and filter in memory)
         for chunk_id in qdrant_results:
-            for i in range(1, 3):  # Limit to 2 succeeding chunks
-                next_chunk_id = chunk_id + i
-                
-                # Check if the next chunk exists and get its content
-                stmt = select(DocumentChunk.content).where(DocumentChunk.chunk_id == next_chunk_id)
-                result = (await session.execute(stmt)).scalar_one_or_none()
-
-                if result is None:
-                    break  # Stop if the chunk doesn't exist
-
-                all_required_chunk_ids.add(next_chunk_id)
-
-                # Check the condition to stop adding chunks
-                if len(result) > 1 and result.endswith('.'):
-                    break
+            all_required_chunk_ids.add(chunk_id + 1)
+            all_required_chunk_ids.add(chunk_id + 2)
         
         final_sorted_chunk_ids = sorted(list(all_required_chunk_ids))
               
