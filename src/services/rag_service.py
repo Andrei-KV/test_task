@@ -162,7 +162,7 @@ class QueryQdrantClient:
         ]
 
         top_relevant_chunks = filtered_candidates[:8]
-        logger.info(f"top_relevant_chunks: {top_relevant_chunks[:8]}")
+        # logger.info(f"top_relevant_chunks: {top_relevant_chunks[:8]}")
 
         if not top_relevant_chunks:
             logger.warning(f"No relevant chunks found for document_id: {target_document_id}")
