@@ -208,7 +208,7 @@ def split_text_into_chunks(
     paragraphs = re.split(pattern, text)
     cleaned_paragraphs = []
     for p in paragraphs:
-        logger.info(f'FLAGparagraph before cleaning: {p}')
+        #logger.info(f'FLAGparagraph before cleaning: {p}')
         cleaned_p = clean_text(p)
         if len(cleaned_p.split()) >= 3:
             cleaned_paragraphs.append(cleaned_p)
@@ -254,7 +254,7 @@ def split_text_into_chunks(
     
 
     docs_for_chunking = previous_overlap_sentences + docs_for_chunking
-    logger.info(f'FLAGdocs_for_chunking: {docs_for_chunking}')
+    #logger.info(f'FLAGdocs_for_chunking: {docs_for_chunking}')
     # 3. Create chunks with greedy approach, using sentences as base units
     chunks = []
     # current_sentences_in_chunk: list of sentences that make up the current chunk
@@ -323,7 +323,7 @@ def split_text_into_chunks(
         if tail_tokens >= overlap:
             break
             
-    logger.info(f'FLAGchunks {chunks}')
+    #logger.info(f'FLAGchunks {chunks}')
     return chunks, tail_sentences
 
  
