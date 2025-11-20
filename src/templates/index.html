@@ -31,6 +31,7 @@
         var ws = new WebSocket(wsUrl);
 
         ws.onopen = function(event) {
+            console.log("WebSocket connection established successfully.");
             var messages = document.getElementById('messages');
             var message = document.createElement('li');
             message.className = 'message bot-message';
@@ -40,7 +41,6 @@
             message.appendChild(content);
             messages.appendChild(message);
         };
-        
         ws.onmessage = function(event) {
             var messages = document.getElementById('messages');
             var message = document.createElement('li');
