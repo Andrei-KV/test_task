@@ -12,7 +12,7 @@ TARGET_FOLDER_ID = os.getenv('TARGET_FOLDER_ID')
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 # Qdrant configuration
-QDRANT_HOST = os.getenv('QDRANT_HOST')
+QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 COLLECTION_NAME = os.getenv('COLLECTION_NAME')
 
 # Embedding model configuration
@@ -27,7 +27,7 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 RESERVE_LLM_MODEL = "deepseek-chat"
 
 # Redis configuration
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 
 # Telegram bot configuration

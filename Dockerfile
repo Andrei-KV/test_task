@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y \
 
 # Копирование файлов проекта
 WORKDIR /app
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml ./
 
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
     poetry install --only main --no-root
-
+    
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
 
@@ -38,6 +38,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Копирование исходного кода приложения
 COPY src ./src
 COPY main.py .
+COPY rag-test-task-743ae7e0d95d.json .
+COPY process_new_documents_test.py .
+COPY delete_document.py .
+COPY clear_databases.py .
 
 # Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150"]
