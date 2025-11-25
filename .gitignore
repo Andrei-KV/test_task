@@ -14,6 +14,7 @@ chunks_test2.txt
 test_file_2.py
 test_select_chunks.py
 test_chunks_doc1.txt
+test_pipeline_quick.py
 test_process_new_documents_test.py
 test_websocket_manager.py
 test_chat.py
@@ -24,5 +25,8 @@ verify_optimization.py
 app.log.*
 app.log*
 
+# Test pipeline output files
+test_output.txt
+test_output_*.txt
 
-
+implementation_plan.md

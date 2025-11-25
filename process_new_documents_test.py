@@ -10,18 +10,6 @@ from sqlalchemy.orm import Session
 from src.config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID
 from src.database.database import AsyncSessionLocal, async_engine, init_db
 from src.database.models import Document, DocumentChunk
-from src.services.document_processor import (
-    clean_text,
-    parse_doc,
-    parse_docx,
-    parse_md,
-    parse_excel,
-    parse_image,
-    parse_pdf,
-    parse_rtf,
-    parse_txt,
-    split_text_into_chunks,
-)
 from src.services.google_drive import (
     download_drive_file_content,
     get_drive_web_link,
@@ -29,7 +17,6 @@ from src.services.google_drive import (
     list_files_in_folder,
 )
 from src.services.vectorization import indexing_pipe_line
-from src.services.document_parser import document_parser
 # Настройка логирования
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -109,64 +96,31 @@ async def process_new_documents():
             if raw_content_bytes is None:
                 continue
 
-            # pages = []
-            # if (
-            #     file_mime_type
-            #     == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            # ):
-            #     pages = parse_docx(raw_content_bytes)
-            # elif file_mime_type == "application/pdf":
-            #     pages = parse_pdf(raw_content_bytes)
-            # elif file_mime_type == "application/msword":
-            #     pages = parse_doc(raw_content_bytes)
-            # elif file_mime_type == "application/rtf":
-            #     pages = parse_rtf(raw_content_bytes)
-            # elif file_mime_type == "text/markdown":
-            #     pages = parse_md(raw_content_bytes.decode("utf-8"))
-            # elif file_mime_type == "text/plain":
-            #     pages = parse_txt(raw_content_bytes.decode("utf-8"))
-            # elif (
-            #     file_mime_type
-            #     == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            #     or file_mime_type == "application/vnd.ms-excel"
-            # ):
-            #     pages = parse_excel(raw_content_bytes)
-            # elif file_mime_type.startswith("image/"):
-            #     pages = parse_image(raw_content_bytes)
-            # else:
-            #     logger.warning(f"Unsupported file format: {file_mime_type}")
-            #     continue
+            # Use the new DocumentProcessorService pipeline
+            from src.services.document_processor_service import document_processor_service
             
-            pages = document_parser.parse_file(raw_content_bytes, file_name, file_mime_type)
+            chunks_data = document_processor_service.process_document(
+                file_content=raw_content_bytes,
+                file_name=file_name,
+                mime_type=file_mime_type,
+                document_id=document_id,
+                document_title=file_name  # Using filename as title for now
+            )
 
-            if not pages:
-                logger.warning(f"Could not parse document: {file_name}")
+            if not chunks_data:
+                logger.warning(f"Could not create chunks for document: {file_name}")
                 continue
 
-            previous_overlap_sentences = []
             chunk_objects_to_process = []
-
-            for page in pages:
-                page_content = page['content']
-                page_num = page['page_number']
-                chunks, current_tail = split_text_into_chunks(
-                    page_content, 
-                    chunk_size=350, 
-                    overlap=50,
-                    previous_overlap_sentences=previous_overlap_sentences # tail prev page
+            for chunk_data in chunks_data:
+                new_document_chunk = DocumentChunk(
+                    document_id=document_id,
+                    content=chunk_data['content'],
+                    page_number=chunk_data['page_number'],
+                    qdrant_id=chunk_data['qdrant_id'],
                 )
-                # Update previous overlap sentences for next page
-                previous_overlap_sentences = current_tail
-                for chunk in chunks:
-                    qdrant_uuid = str(uuid4())
-                    new_document_chunk = DocumentChunk(
-                        document_id=document_id,
-                        content=chunk,
-                        page_number=page_num,
-                        qdrant_id=qdrant_uuid,
-                    )
-                    session.add(new_document_chunk)
-                    chunk_objects_to_process.append(new_document_chunk)
+                session.add(new_document_chunk)
+                chunk_objects_to_process.append(new_document_chunk)
             await session.commit()
             logger.info("Committed new chunks to the database.")
             indexing_pipe_line.run(chunk_objects_to_process)
