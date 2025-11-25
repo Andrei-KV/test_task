@@ -29,7 +29,7 @@ from src.services.google_drive import (
     list_files_in_folder,
 )
 from src.services.vectorization import indexing_pipe_line
-
+from src.services.document_parser import document_parser
 # Настройка логирования
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -109,44 +109,53 @@ async def process_new_documents():
             if raw_content_bytes is None:
                 continue
 
-            pages = []
-            if (
-                file_mime_type
-                == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ):
-                pages = parse_docx(raw_content_bytes)
-            elif file_mime_type == "application/pdf":
-                pages = parse_pdf(raw_content_bytes)
-            elif file_mime_type == "application/msword":
-                pages = parse_doc(raw_content_bytes)
-            elif file_mime_type == "application/rtf":
-                pages = parse_rtf(raw_content_bytes)
-            elif file_mime_type == "text/markdown":
-                pages = parse_md(raw_content_bytes.decode("utf-8"))
-            elif file_mime_type == "text/plain":
-                pages = parse_txt(raw_content_bytes.decode("utf-8"))
-            elif (
-                file_mime_type
-                == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                or file_mime_type == "application/vnd.ms-excel"
-            ):
-                pages = parse_excel(raw_content_bytes)
-            elif file_mime_type.startswith("image/"):
-                pages = parse_image(raw_content_bytes)
-            else:
-                logger.warning(f"Unsupported file format: {file_mime_type}")
-                continue
+            # pages = []
+            # if (
+            #     file_mime_type
+            #     == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            # ):
+            #     pages = parse_docx(raw_content_bytes)
+            # elif file_mime_type == "application/pdf":
+            #     pages = parse_pdf(raw_content_bytes)
+            # elif file_mime_type == "application/msword":
+            #     pages = parse_doc(raw_content_bytes)
+            # elif file_mime_type == "application/rtf":
+            #     pages = parse_rtf(raw_content_bytes)
+            # elif file_mime_type == "text/markdown":
+            #     pages = parse_md(raw_content_bytes.decode("utf-8"))
+            # elif file_mime_type == "text/plain":
+            #     pages = parse_txt(raw_content_bytes.decode("utf-8"))
+            # elif (
+            #     file_mime_type
+            #     == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            #     or file_mime_type == "application/vnd.ms-excel"
+            # ):
+            #     pages = parse_excel(raw_content_bytes)
+            # elif file_mime_type.startswith("image/"):
+            #     pages = parse_image(raw_content_bytes)
+            # else:
+            #     logger.warning(f"Unsupported file format: {file_mime_type}")
+            #     continue
             
+            pages = document_parser.parse_file(raw_content_bytes, file_name, file_mime_type)
+
+            if not pages:
+                logger.warning(f"Could not parse document: {file_name}")
+                continue
+
             previous_overlap_sentences = []
             chunk_objects_to_process = []
-            for page_content, page_num in pages:
-                # cleaned_content = clean_text(page_content)
+
+            for page in pages:
+                page_content = page['content']
+                page_num = page['page_number']
                 chunks, current_tail = split_text_into_chunks(
                     page_content, 
                     chunk_size=350, 
                     overlap=50,
                     previous_overlap_sentences=previous_overlap_sentences # tail prev page
                 )
+                # Update previous overlap sentences for next page
                 previous_overlap_sentences = current_tail
                 for chunk in chunks:
                     qdrant_uuid = str(uuid4())

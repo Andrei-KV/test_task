@@ -19,6 +19,7 @@ test_websocket_manager.py
 test_chat.py
 test_document_processor.py
 test_rag_service.py
+verify_optimization.py
 
 app.log.*
 app.log*
