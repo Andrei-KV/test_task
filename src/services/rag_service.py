@@ -31,21 +31,28 @@ if (LLM_MODEL is None) or (COLLECTION_NAME is None) or (DEEPSEEK_API_KEY is None
 # =====================================================================
 # Сервис векторизации запроса
 class QueryEmbeddingService:
-    def __init__(self, model_name: str):
-        # Загрузка тяжелого ресурса (SentenceTransformer) один раз
-        self.__model = SentenceTransformer(model_name)
+    def __init__(self, api_key: str, model_name: str):
+        self.__client = genai.Client(api_key=api_key)
+        self.__model_name = model_name
 
     async def vectorize_query(self, query: str) -> list[float]:
         """Векторизует один текстовый запрос для поиска."""
-        logger.info("Vectorizing user query...")
-        query_embedding = await asyncio.to_thread(
-            self.__model.encode,
-            [query],
-            normalize_embeddings=True,
-            convert_to_tensor=False
-        )
-        logger.info("User query vectorized successfully.")
-        return query_embedding.tolist()[0]
+        logger.info("Vectorizing user query with Gemini...")
+        try:
+            result = await self.__client.aio.models.embed_content(
+                model=self.__model_name,
+                contents=query,
+                config=genai.types.EmbedContentConfig(
+                    task_type="RETRIEVAL_QUERY",
+                    output_dimensionality=3072
+                )
+            )
+            logger.info("User query vectorized successfully.")
+            # result.embeddings is a list, we take the first one
+            return result.embeddings[0].values
+        except Exception as e:
+            logger.error(f"Error vectorizing query: {e}")
+            raise
     
 
 # Semantic search in Qdrant

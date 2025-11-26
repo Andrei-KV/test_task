@@ -16,7 +16,8 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 COLLECTION_NAME = os.getenv('COLLECTION_NAME')
 
 # Embedding model configuration
-EMBEDDING_MODEL_NAME = os.getenv('EMBEDDING_MODEL_NAME')
+EMBEDDING_MODEL_NAME = "models/gemini-embedding-001"
+EMBEDDING_DIMENSION = 3072
 # RERANKER_MODEL_NAME = os.getenv('RERANKER_MODEL_NAME')
 
 # LLM configuration

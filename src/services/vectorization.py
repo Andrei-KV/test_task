@@ -18,22 +18,41 @@ logger = get_logger(__name__)
 if (QDRANT_HOST is None) or (COLLECTION_NAME is None) or (EMBEDDING_MODEL_NAME is None):
     raise ValueError("Переменные не найдены. Проверьте файл .env.")
 
+from google import genai
+from src.config import GEMINI_API_KEY, EMBEDDING_DIMENSION
+
 class EmbeddingService:
-    """Инкапсулирует модель SentenceTransformer и логику векторизации."""
+    """Инкапсулирует клиент Gemini и логику векторизации."""
     
     def __init__(self, model_name: str):
-        self.__model = SentenceTransformer(model_name)
-        self.vector_dimension = self.__model.get_sentence_embedding_dimension()
+        self.__client = genai.Client(api_key=GEMINI_API_KEY)
+        self.__model_name = model_name
+        self.vector_dimension = EMBEDDING_DIMENSION
 
     def vectorize_chunks(self, chunks: list[str]) -> list[list[float]]:
-        """Векторизует список текстовых фрагментов, используя инкапсулированную модель."""
-        logger.info("Vectorizing user file...")
-        embeddings = self.__model.encode(
-            chunks,
-            show_progress_bar=True,
-            normalize_embeddings=True,
-            convert_to_tensor=False
-        ).tolist()
+        """Векторизует список текстовых фрагментов, используя Gemini API."""
+        logger.info("Vectorizing user file with Gemini...")
+        embeddings = []
+        # Gemini API doesn't support batch embedding in the same way as SentenceTransformer
+        # We need to iterate or use batch methods if available. 
+        # For now, simple iteration to ensure correctness.
+        for chunk in chunks:
+            try:
+                result = self.__client.models.embed_content(
+                    model=self.__model_name,
+                    contents=chunk,
+                    config=genai.types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        output_dimensionality=self.vector_dimension
+                    )
+                )
+                embeddings.append(result.embeddings[0].values)
+            except Exception as e:
+                logger.error(f"Error embedding chunk: {e}")
+                # Append zero vector or handle error? 
+                # For now, raising to fail fast in tests
+                raise e
+                
         logger.info("Text vectorized successfully.")
         return embeddings
 
