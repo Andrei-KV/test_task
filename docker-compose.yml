@@ -22,31 +22,10 @@ services:
     networks:
       - in_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  # ----------------------------------------------------------------
-  # 2. Qdrant Service (Векторная база данных)
-  # ----------------------------------------------------------------
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: legal_rag_qdrant
-    restart: always
-    environment:
-      # Настройки Qdrant (можно оставить по умолчанию)
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    ports:
-      # Порт REST API (соответствует вашему QDRANT_HOST)
-      - "6333:6333"
-      # Порт gRPC
-      - "6334:6334"
-    networks:
-      - in_net
-    volumes:
-      # Сохранение данных Qdrant (критично для сохранения векторов)
-      - qdrant_data:/qdrant/storage
 
   # ----------------------------------------------------------------
   # 3. Redis Service (Кэш и хранилище сессий)
@@ -62,13 +41,37 @@ services:
     networks:
       - in_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
-# ----------------------------------------------------------------
-  # 4. FastAPI App Service (Основное приложение)
+  # ----------------------------------------------------------------
+  # 4. OpenSearch Service (Гибридный поиск)
+  # ----------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - DISABLE_SECURITY_PLUGIN=true # For development only
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin123!"
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    networks:
+      - in_net
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ----------------------------------------------------------------
+  # 5. FastAPI App Service (Основное приложение)
   # ----------------------------------------------------------------
   app:
     build: .
@@ -83,15 +86,16 @@ services:
     depends_on:
       postgres_db:
         condition: service_healthy
-      qdrant:
-        condition: service_started
       redis:
+        condition: service_healthy
+      opensearch:
         condition: service_healthy
 
 volumes:
   postgres_data:
-  qdrant_data:
   redis_data:
+  opensearch_data:
+
 
 networks:
   in_net:

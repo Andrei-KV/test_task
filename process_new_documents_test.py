@@ -96,26 +96,10 @@ async def process_new_documents():
             if raw_content_bytes is None:
                 continue
 
-            # 2. Recreate collection if needed
-            try:
-                # Check if collection exists
-                collections = client.get_collections().collections
-                exists = any(c.name == COLLECTION_NAME for c in collections)
-                
-                if exists:
-                    logger.info(f"Collection '{COLLECTION_NAME}' exists. Deleting...")
-                    client.delete_collection(COLLECTION_NAME)
-                    
-                logger.info(f"Creating collection '{COLLECTION_NAME}' with dimension {EMBEDDING_DIMENSION}...")
-                client.create_collection(
-                    collection_name=COLLECTION_NAME,
-                    vectors_config=VectorParams(size=EMBEDDING_DIMENSION, distance=Distance.COSINE)
-                )
-                logger.info("Collection created successfully.")
-                
-            except Exception as e:
-                logger.error(f"Error managing collection: {e}")
-                return
+            # 2. Recreate collection if needed (handled by pipeline)
+            # Logic for recreating collection is now part of the pipeline or handled implicitly
+            # OpenSearch index creation is idempotent in the updated pipeline
+            pass
             # Use the new DocumentProcessorService pipeline
             from src.services.document_processor_service import document_processor_service
             
