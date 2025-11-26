@@ -41,16 +41,46 @@
             message.appendChild(content);
             messages.appendChild(message);
         };
+        let loadingMessage = null; // Track the loading message element
+        
         ws.onmessage = function(event) {
             var messages = document.getElementById('messages');
-            var message = document.createElement('li');
-            message.className = 'message bot-message';
-            var content = document.createElement('div');
-            content.className = 'message-content';
-
+            
             try {
                 // Пытаемся распарсить JSON
                 const data = JSON.parse(event.data);
+                
+                // Если это индикатор загрузки
+                if (data.is_loading) {
+                    // Удаляем предыдущий индикатор, если он есть
+                    if (loadingMessage) {
+                        loadingMessage.remove();
+                    }
+                    
+                    // Создаем новый индикатор загрузки
+                    loadingMessage = document.createElement('li');
+                    loadingMessage.className = 'message bot-message loading-message';
+                    var content = document.createElement('div');
+                    content.className = 'message-content';
+                    content.innerHTML = data.text;
+                    loadingMessage.appendChild(content);
+                    messages.appendChild(loadingMessage);
+                    messages.scrollTop = messages.scrollHeight;
+                    return; // Выходим, не обрабатываем дальше
+                }
+                
+                // Если это обычное сообщение, удаляем индикатор загрузки
+                if (loadingMessage) {
+                    loadingMessage.remove();
+                    loadingMessage = null;
+                }
+                
+                // Создаем обычное сообщение бота
+                var message = document.createElement('li');
+                message.className = 'message bot-message';
+                var content = document.createElement('div');
+                content.className = 'message-content';
+                
                 if (data.text) {
                     // Если есть текст, обрабатываем его как Markdown
                     content.innerHTML = marked.parse(data.text);
@@ -83,14 +113,26 @@
                     // }
                     content.appendChild(sourceContainer);
                 }
+                
+                message.appendChild(content);
+                messages.appendChild(message);
+                messages.scrollTop = messages.scrollHeight; // Auto-scroll
             } catch (e)  {
-                // Если не JSON, вставляем как обычный текст
+                // Если не JSON, удаляем индикатор загрузки и вставляем как обычный текст
+                if (loadingMessage) {
+                    loadingMessage.remove();
+                    loadingMessage = null;
+                }
+                
+                var message = document.createElement('li');
+                message.className = 'message bot-message';
+                var content = document.createElement('div');
+                content.className = 'message-content';
                 content.innerHTML = event.data;
+                message.appendChild(content);
+                messages.appendChild(message);
+                messages.scrollTop = messages.scrollHeight; // Auto-scroll
             }
-
-            message.appendChild(content);
-            messages.appendChild(message);
-            messages.scrollTop = messages.scrollHeight; // Auto-scroll
         };
 
         function sendMessage(event) {

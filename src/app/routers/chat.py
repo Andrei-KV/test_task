@@ -28,8 +28,8 @@ async def websocket_endpoint(
             data = await websocket.receive_text()
             await context_manager.add_message(client_id, "user", data)
             
-            # Send "Processing..." message
-            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket)
+            # Send "Processing..." message with loading indicator
+            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket, is_loading=True)
 
             history = await context_manager.get_full_history(client_id)
             context_query = ""
