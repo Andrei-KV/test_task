@@ -111,42 +111,130 @@ class DocumentParser:
             logger.warning(f"Ошибка OCR: {e}")
             return ""
 
+import re
+from pdf2image import convert_from_path
+
+# ... existing imports ...
+
+class DocumentParser:
+    # ... existing __init__ ...
+
+    def _is_garbage(self, text: str) -> bool:
+        """
+        Проверяет, является ли извлеченный текст 'мусором'.
+        Улучшенная эвристика:
+        1. Считаем отношение "разрешенных" символов (кириллица, латиница, цифры, пунктуация) к общей длине.
+        2. Если "мусорных" символов (Extended Latin и прочее) > 10%, считаем текст мусором.
+        """
+        if not text:
+            return False
+            
+        text_len = len(text)
+        if text_len < 20:
+            return False # Слишком короткий
+            
+        # Разрешенные символы:
+        # - Кириллица: \u0400-\u04FF (в регексе [а-яА-ЯёЁ])
+        # - Латиница (Basic): a-zA-Z
+        # - Цифры: 0-9
+        # - Пунктуация и пробелы: \s.,;:!?()[]{}"'-_+=/\|%@#№$€£*<>&
+        
+        # Паттерн разрешенных символов
+        allowed_pattern = re.compile(r'[а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()\[\]{}"\'\-_+=/\\|%@#№$€£*<>&]')
+        
+        # Находим все символы, которые НЕ подходят под паттерн
+        garbage_chars_count = len([c for c in text if not allowed_pattern.match(c)])
+        
+        garbage_ratio = garbage_chars_count / text_len
+        
+        # Если мусора больше 10%, то это, вероятно, битая кодировка (Extended Latin и т.д.)
+        if garbage_ratio > 0.1:
+            return True
+            
+        # Дополнительная проверка на кириллицу для русскоязычных документов
+        # Если текст длинный (>50), а кириллицы < 5% и это не чистая латиница (английский), то подозрительно.
+        cyrillic_count = len(re.findall(r'[а-яА-ЯёЁ]', text))
+        latin_count = len(re.findall(r'[a-zA-Z]', text))
+        
+        if text_len > 50:
+             # Если мало кириллицы И мало латиницы (например, одни цифры и спецсимволы - это ОК, но если там кракозябры...)
+             # Но кракозябры обычно попадают в garbage_ratio.
+             # Эта проверка скорее для случаев, когда кракозябры состоят из Basic Latin, но бессмысленны.
+             # Пока оставим проверку на отсутствие кириллицы, если это не английский текст.
+             if cyrillic_count / text_len < 0.05 and latin_count / text_len < 0.5:
+                 # Мало кириллицы и не похоже на английский текст -> вероятно мусор
+                 return True
+
+        return False
+
     def _parse_pdf(self, file_path: str) -> List[Dict[str, Any]]:
         """
         Парсинг PDF: текст + изображения (OCR).
+        Если текст страницы похож на мусор, страница конвертируется в изображение и OCR-ится целиком.
         """
         content = []
         try:
             doc = fitz.open(file_path)
             for page_num, page in enumerate(doc):
-                # 1. Извлекаем обычный текст (включая таблицы, если они текстом)
+                # 1. Извлекаем обычный текст
                 page_text = page.get_text()
                 
-                # 2. Ищем изображения на странице (схемы, сканы)
-                image_list = page.get_images(full=True)
-                ocr_text_list = []
-                
-                if image_list:
-                    logger.info(f"Найдено {len(image_list)} изображений на стр. {page_num + 1}")
-                    for img_index, img in enumerate(image_list):
-                        try:
-                            xref = img[0]
-                            base_image = doc.extract_image(xref)
-                            image_bytes = base_image["image"]
-                            
-                            # Загружаем в PIL
-                            image = Image.open(io.BytesIO(image_bytes))
-                            
-                            # Фильтр: пропускаем слишком маленькие иконки/линии
-                            if image.width < 50 or image.height < 50:
-                                continue
+                # Проверка на мусор
+                if self._is_garbage(page_text):
+                    logger.warning(f"Обнаружен мусорный текст на стр. {page_num + 1}. Применяем полный OCR страницы.")
+                    try:
+                        # Конвертируем страницу PDF в изображение
+                        # Используем pdf2image с пониженным DPI для экономии памяти (200 достаточно для текста)
+                        images = convert_from_path(file_path, first_page=page_num+1, last_page=page_num+1, dpi=200)
+                        if images:
+                            # Освобождаем память, закрывая doc на время (хотя fitz держит файл открытым)
+                            # Лучше просто обработать и удалить ссылку на image сразу
+                            page_text = self._perform_ocr(images[0])
+                            images[0].close() # Явное закрытие
+                            del images
+                            logger.info(f"OCR выполнен успешно для стр. {page_num + 1}")
+                    except Exception as ocr_e:
+                        logger.error(f"Ошибка полного OCR страницы {page_num + 1}: {ocr_e}")
+                        page_text = "" 
 
-                            # Выполняем OCR
-                            extracted_text = self._perform_ocr(image)
-                            if len(extracted_text) > 10: # Игнорируем мусор
-                                ocr_text_list.append(f"[Текст из изображения/схемы]:\n{extracted_text}")
-                        except Exception as img_e:
-                            logger.warning(f"Ошибка обработки изображения на стр. {page_num + 1}: {img_e}")
+                # 2. Ищем изображения на странице (схемы, сканы) - ТОЛЬКО если мы не делали полный OCR
+                # Если мы сделали полный OCR, то картинки уже распознаны в составе страницы
+                ocr_text_list = []
+                # Проверяем, делали ли мы полный OCR (если page_text был заменен)
+                # Но page_text мог быть заменен на результат OCR, который тоже содержит текст.
+                # Флаг garbage_detected был бы удобнее, но мы уже внутри цикла.
+                # Просто проверим, не вызывали ли мы convert_from_path
+                
+                # Упрощение: если текст был мусором, мы его заменили. 
+                # Если мы заменили текст через OCR всей страницы, то отдельные картинки извлекать не нужно.
+                
+                # Но fitz.open открыт.
+                # Давайте сделаем так: если текст нормальный, то ищем картинки.
+                # Если текст был мусором, мы уже получили всё через OCR.
+                
+                if not self._is_garbage(page.get_text()): # Проверяем ИСХОДНЫЙ текст страницы снова (немного неэффективно, но надежно)
+                     image_list = page.get_images(full=True)
+                     if image_list:
+                        logger.info(f"Найдено {len(image_list)} изображений на стр. {page_num + 1}")
+                        for img_index, img in enumerate(image_list):
+                            try:
+                                xref = img[0]
+                                base_image = doc.extract_image(xref)
+                                image_bytes = base_image["image"]
+                                
+                                # Загружаем в PIL
+                                image = Image.open(io.BytesIO(image_bytes))
+                                
+                                # Фильтр: пропускаем слишком маленькие иконки/линии
+                                if image.width < 50 or image.height < 50:
+                                    continue
+
+                                # Выполняем OCR
+                                extracted_text = self._perform_ocr(image)
+                                if len(extracted_text) > 10: # Игнорируем мусор
+                                    ocr_text_list.append(f"[Текст из изображения/схемы]:\n{extracted_text}")
+                            except Exception as img_e:
+                                logger.warning(f"Ошибка обработки изображения на стр. {page_num + 1}: {img_e}")
 
                 # Объединяем текст страницы и текст из картинок
                 full_page_content = page_text

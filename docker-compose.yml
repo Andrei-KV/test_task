@@ -90,6 +90,14 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./main.py:/app/main.py
+      - ./process_new_documents_test.py:/app/process_new_documents_test.py
+      - ./delete_document.py:/app/delete_document.py
+      - ./clear_databases.py:/app/clear_databases.py
+      - ./verify_ingestion.py:/app/verify_ingestion.py
+    command: uvicorn main:app --host 0.0.0.0 --port 7150 --reload
 
 volumes:
   postgres_data:

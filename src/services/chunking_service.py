@@ -34,8 +34,8 @@ class ChunkingService:
         parsed_pages: List[Dict[str, Any]], 
         document_id: int,
         document_title: str,
-        chunk_size: int = 500, 
-        overlap: int = 100
+        chunk_size: int = 1000,  # Увеличен размер чанка для лучшего контекста
+        overlap: int = 150
     ) -> List[Dict[str, Any]]:
         """
         Creates chunks from parsed pages with rich metadata and contextual headers.
@@ -48,6 +48,9 @@ class ChunkingService:
             page_num = page.get('page_number')
             content_type = page.get('type', 'text')
             sheet_name = page.get('sheet_name')
+
+            # Очистка текста: убираем разрывы строк и исправляем переносы
+            page_content = self._clean_text(page_content)
 
             # Contextual Header for this page/section
             # Example: "Документ: Инструкция. Стр: 5"
@@ -87,6 +90,34 @@ class ChunkingService:
                 ))
 
         return all_chunks_data
+
+    def _clean_text(self, text: str) -> str:
+        """
+        Очищает текст от артефактов форматирования:
+        1. Убирает переносы слов (например, "каче- ство" -> "качество").
+        2. Заменяет одиночные переводы строк на пробелы (reflow).
+        3. Сохраняет абзацы (двойные переводы строк).
+        """
+        if not text:
+            return text
+        
+        # 1. Исправляем переносы: "слово- продолжение" или "слово-\nпродолжение" -> "словопродолжение"
+        # Паттерн: дефис + любые пробелы/переводы строк
+        text = re.sub(r'-[\s\n]+', '', text)
+        
+        # 2. Заменяем одиночные переводы строк на пробелы (для слияния разорванных предложений)
+        # Сохраняем абзацы (двойные и более переводы строк)
+        # Сначала заменяем все последовательности из 2+ переводов строк на маркер
+        text = re.sub(r'\n{2,}', '<<<PARAGRAPH>>>', text)
+        # Теперь заменяем оставшиеся одиночные переводы строк на пробелы
+        text = re.sub(r'\n', ' ', text)
+        # Восстанавливаем абзацы
+        text = re.sub(r'<<<PARAGRAPH>>>', '\n\n', text)
+        
+        # 3. Убираем множественные пробелы
+        text = re.sub(r' {2,}', ' ', text)
+        
+        return text.strip()
 
     def _split_with_recursive(
         self,

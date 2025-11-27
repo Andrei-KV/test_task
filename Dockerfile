@@ -16,7 +16,7 @@ COPY pyproject.toml ./
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
     poetry install --only main --no-root
-    
+
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
 
@@ -24,6 +24,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y \
     tesseract-ocr-rus \
     pandoc \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка переменных окружения

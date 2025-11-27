@@ -32,12 +32,16 @@ if (LLM_MODEL is None) or (DEEPSEEK_API_KEY is None) or (EMBEDDING_MODEL_NAME is
 
 
 # =====================================================================
+from .retry_utils import retry_with_backoff
+
+# =====================================================================
 # Сервис векторизации запроса
 class QueryEmbeddingService:
     def __init__(self, api_key: str, model_name: str):
         self.__client = genai.Client(api_key=api_key)
         self.__model_name = model_name
 
+    @retry_with_backoff
     async def vectorize_query(self, query: str) -> list[float]:
         """Векторизует один текстовый запрос для поиска."""
         logger.info("Vectorizing user query with Gemini...")
@@ -165,6 +169,7 @@ class LLMGenerator:
 
     
     
+    @retry_with_backoff
     async def generate_rag_response(self, context: str, user_query: str, system_instructions: str, title: str, web_link: str, page_numbers: str, low_precision: bool = False) -> str:
         """Генерирует ответ LLM с использованием контекста RAG."""
         logger.info("Generating RAG response...")
@@ -223,7 +228,9 @@ class LLMGenerator:
             
         except Exception as e:
             logger.error(f"An unexpected error occurred during generation: {e}")
-            return f"❌ Произошла непредвиденная ошибка при генерации.\n"
+            # We re-raise here so the retry decorator can catch it. 
+            # If we return an error string, retry won't trigger.
+            raise
 
 # Выбор инструкций для LLM в зависимости от документа
 class PromptManager:
