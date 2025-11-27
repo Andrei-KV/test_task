@@ -3,6 +3,7 @@ import logging
 import tempfile
 import mimetypes
 import io
+import re
 from typing import List, Dict, Any
 
 # Библиотеки для обработки форматов
@@ -13,6 +14,7 @@ import markdown
 from bs4 import BeautifulSoup
 from PIL import Image
 import pytesseract
+from pdf2image import convert_from_path
 
 # Настройка логирования
 from src.app.logging_config import get_logger
@@ -111,13 +113,6 @@ class DocumentParser:
             logger.warning(f"Ошибка OCR: {e}")
             return ""
 
-import re
-from pdf2image import convert_from_path
-
-# ... existing imports ...
-
-class DocumentParser:
-    # ... existing __init__ ...
 
     def _is_garbage(self, text: str) -> bool:
         """
