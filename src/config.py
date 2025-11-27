@@ -15,8 +15,17 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
 COLLECTION_NAME = os.getenv('COLLECTION_NAME')
 
+# OpenSearch configuration
+OPENSEARCH_HOST = os.getenv("OPENSEARCH_HOST", "localhost")
+OPENSEARCH_PORT = int(os.getenv("OPENSEARCH_PORT", 9200))
+OPENSEARCH_INDEX = os.getenv("OPENSEARCH_INDEX", "rag_chunks")
+OPENSEARCH_USE_SSL = os.getenv("OPENSEARCH_USE_SSL", "false").lower() == "true"
+OPENSEARCH_VERIFY_CERTS = os.getenv("OPENSEARCH_VERIFY_CERTS", "false").lower() == "true"
+
+
 # Embedding model configuration
-EMBEDDING_MODEL_NAME = os.getenv('EMBEDDING_MODEL_NAME')
+EMBEDDING_MODEL_NAME = "models/gemini-embedding-001"
+EMBEDDING_DIMENSION = 3072
 # RERANKER_MODEL_NAME = os.getenv('RERANKER_MODEL_NAME')
 
 # LLM configuration

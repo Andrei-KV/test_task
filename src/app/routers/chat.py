@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from ..dependencies.websocket_manager import manager
 from ..dependencies.rag import get_rag_service
 from ..dependencies.context import get_context_manager
-from ...services.rag_service import RAGService
+from ...services.rag_service_opensearch import RAGService
 from ...services.context_manager import ContextManagerService
 from src.app.logging_config import get_logger
 
@@ -28,8 +28,8 @@ async def websocket_endpoint(
             data = await websocket.receive_text()
             await context_manager.add_message(client_id, "user", data)
             
-            # Send "Processing..." message
-            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket)
+            # Send "Processing..." message with loading indicator
+            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket, is_loading=True)
 
             history = await context_manager.get_full_history(client_id)
             context_query = ""
