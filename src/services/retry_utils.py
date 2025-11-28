@@ -4,6 +4,7 @@ from tenacity import (
     stop_after_attempt,
     wait_random_exponential,
     retry_if_exception_type,
+    retry_if_exception,
     before_sleep_log
 )
 from google.genai import errors
@@ -22,16 +23,8 @@ def is_rate_limit_error(exception):
 # Decorator for retrying with exponential backoff
 # Waits 1s, 2s, 4s, ... up to 60s, with random jitter.
 retry_with_backoff = retry(
-    retry=retry_if_exception_type(errors.ClientError), # We can refine this to only retry 429 if needed, but for now ClientError is safe-ish if we check inside or just retry all client errors that might be transient? 
-    # Actually, let's use a custom predicate to be safe and only retry 429s.
-    # But wait, tenacity's retry_if_exception_type takes a class.
-    # Let's use retry_if_exception to use our custom function.
-    
-    # Update: The error seen is `google.genai.errors.ClientError`.
-    # Let's retry on that specific error if it matches our check.
     retry=retry_if_exception(is_rate_limit_error),
-    
     wait=wait_random_exponential(multiplier=1, max=60),
-    stop=stop_after_attempt(10), # Try up to 10 times. With exp backoff this covers a few minutes.
+    stop=stop_after_attempt(20), # Try up to 20 times. With exp backoff this covers a few minutes.
     before_sleep=before_sleep_log(logger, logging.WARNING)
 )

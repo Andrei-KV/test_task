@@ -2,14 +2,12 @@ import asyncio
 import os
 from opensearchpy import AsyncOpenSearch
 from src.config import (
+    OPENSEARCH_HOST,
     OPENSEARCH_PORT,
     OPENSEARCH_INDEX,
     OPENSEARCH_USE_SSL,
     OPENSEARCH_VERIFY_CERTS
 )
-
-# Force localhost for local verification script
-OPENSEARCH_HOST = "localhost"
 
 async def verify_ingestion():
     client = AsyncOpenSearch(

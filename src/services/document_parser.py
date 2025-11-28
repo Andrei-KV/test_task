@@ -4,6 +4,7 @@ import tempfile
 import mimetypes
 import io
 import re
+import time
 from typing import List, Dict, Any
 
 # Библиотеки для обработки форматов
@@ -14,7 +15,12 @@ import markdown
 from bs4 import BeautifulSoup
 from PIL import Image
 import pytesseract
+from pytesseract import Output
 from pdf2image import convert_from_path
+
+# Наши утилиты
+from .page_processing_utils import timeout, TimeoutError
+from .failed_pages_logger import failed_pages_logger
 
 # Настройка логирования
 from src.app.logging_config import get_logger
@@ -25,7 +31,7 @@ class DocumentParser:
     Универсальный парсер документов.
     Возможности:
     - Сохранение нумерации страниц (через конвертацию в PDF).
-    - OCR для изображений и схем внутри документов.
+    - OCR для изображений и схем внутри документов (Tesseract).
     - Извлечение таблиц из Excel.
     """
 
@@ -50,12 +56,13 @@ class DocumentParser:
             'image/tiff': self._parse_image,
             'image/bmp': self._parse_image,
             
-            # Текст
             'text/plain': self._parse_txt,
             'text/markdown': self._parse_md,
         }
+        
+        logger.info("✅ DocumentParser initialized (Tesseract only)")
 
-    def parse_file(self, content: bytes, file_name: str, mime_type: str = None) -> List[Dict[str, Any]]:
+    def parse_file(self, content: bytes, file_name: str, mime_type: str = None, max_pages: int = None) -> List[Dict[str, Any]]:
         """
         Главный метод обработки файла.
         """
@@ -64,7 +71,6 @@ class DocumentParser:
             ext = mimetypes.guess_extension(mime_type) or ''
 
         # Сохраняем во временный файл
-        # Это необходимо, так как многие библиотеки (PyMuPDF, python-docx) работают с путями к файлам, а не с байтами в памяти.
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
             temp_file.write(content)
             temp_file_path = temp_file.name
@@ -78,24 +84,25 @@ class DocumentParser:
             
             # Фолбэк по расширению
             if not parser:
-                ext_lower = ext.lower()
-                if ext_lower in ['.docx', '.doc', '.rtf']:
-                    parser = self._parse_via_pdf_conversion
-                elif ext_lower == '.pdf':
+                if ext.lower() == '.pdf':
                     parser = self._parse_pdf
-                elif ext_lower in ['.xlsx', '.xls']:
+                elif ext.lower() in ['.docx', '.doc', '.rtf']:
+                    parser = self._parse_via_pdf_conversion
+                elif ext.lower() in ['.xlsx', '.xls']:
                     parser = self._parse_excel
-                elif ext_lower in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
+                elif ext.lower() in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
                     parser = self._parse_image
-                elif ext_lower in ['.txt', '.md']:
+                elif ext.lower() in ['.txt', '.md']:
                     parser = self._parse_txt
-
-            if not parser:
-                logger.warning(f"Не найден парсер для {file_name} ({mime_type})")
+            
+            if parser:
+                logger.info(f"Начало парсинга {file_name} ({parser.__name__})")
+                if parser == self._parse_pdf:
+                     return parser(temp_file_path, max_pages=max_pages)
+                return parser(temp_file_path)
+            else:
+                logger.warning(f"Неподдерживаемый формат файла: {file_name} ({mime_type})")
                 return []
-
-            logger.info(f"Начало парсинга {file_name} ({parser.__name__})")
-            return parser(temp_file_path)
 
         except Exception as e:
             logger.error(f"Критическая ошибка парсинга {file_name}: {e}")
@@ -104,22 +111,64 @@ class DocumentParser:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
-    def _perform_ocr(self, image: Image.Image, lang='rus+eng') -> str:
-        """Вспомогательный метод для OCR."""
+    def _extract_text_with_tesseract(self, image: Image.Image, lang='rus+eng') -> str:
+        """
+        Extract text using Tesseract with confidence filtering.
+        Only returns text if confidence > 70 (0.7).
+        """
         try:
-            text = pytesseract.image_to_string(image, lang=lang)
-            return text.strip()
-        except Exception as e:
-            logger.warning(f"Ошибка OCR: {e}")
-            return ""
+            # Используем image_to_data для получения уверенности
+            # config='--psm 6' предполагаем единый блок текста
+            custom_config = r'--oem 1 --psm 6'
+            
+            data = pytesseract.image_to_data(image, lang=lang, config=custom_config, output_type=Output.DICT)
+            
+            extracted_words = []
+            
+            n_boxes = len(data['text'])
+            for i in range(n_boxes):
+                # data['conf'][i] может быть -1 для блоков без текста
+                conf = float(data['conf'][i])
+                text = data['text'][i].strip()
+                
+                # Фильтруем по уверенности > 70 (это 0.7 в Tesseract scale 0-100)
+                if int(conf) > 70 and text:
+                    extracted_words.append(text)
+            
+            # Если слов мало или ничего не нашли
+            if not extracted_words:
+                return ""
+                
+            # Собираем текст обратно (просто через пробел, так как структура теряется при фильтрации слов)
+            # Для более сложной структуры нужно анализировать block_num, par_num, line_num
+            # Но для "вытащить текст из картинки" этого часто достаточно.
+            # Попробуем сохранить переносы строк, если они были в исходных блоках?
+            # image_to_data дает line_num.
+            
+            # Пересборка с учетом строк:
+            lines = {}
+            for i in range(n_boxes):
+                conf = float(data['conf'][i])
+                text = data['text'][i].strip()
+                if int(conf) > 70 and text:
+                    line_num = data['line_num'][i]
+                    if line_num not in lines:
+                        lines[line_num] = []
+                    lines[line_num].append(text)
+            
+            sorted_lines = sorted(lines.keys())
+            final_text = "\n".join([" ".join(lines[ln]) for ln in sorted_lines])
+            
+            logger.debug(f"Tesseract extracted {len(final_text)} chars with conf > 70")
+            return final_text.strip()
 
+        except Exception as e:
+            logger.warning(f"Ошибка OCR (Tesseract): {e}")
+            return ""
 
     def _is_garbage(self, text: str) -> bool:
         """
         Проверяет, является ли извлеченный текст 'мусором'.
-        Улучшенная эвристика:
-        1. Считаем отношение "разрешенных" символов (кириллица, латиница, цифры, пунктуация) к общей длине.
-        2. Если "мусорных" символов (Extended Latin и прочее) > 10%, считаем текст мусором.
         """
         if not text:
             return False
@@ -132,9 +181,7 @@ class DocumentParser:
         # - Кириллица: \u0400-\u04FF (в регексе [а-яА-ЯёЁ])
         # - Латиница (Basic): a-zA-Z
         # - Цифры: 0-9
-        # - Пунктуация и пробелы: \s.,;:!?()[]{}"'-_+=/\|%@#№$€£*<>&
-        
-        # Паттерн разрешенных символов
+        # - Пунктуация и пробелы
         allowed_pattern = re.compile(r'[а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()\[\]{}"\'\-_+=/\\|%@#№$€£*<>&]')
         
         # Находим все символы, которые НЕ подходят под паттерн
@@ -142,35 +189,187 @@ class DocumentParser:
         
         garbage_ratio = garbage_chars_count / text_len
         
-        # Если мусора больше 10%, то это, вероятно, битая кодировка (Extended Latin и т.д.)
+        # Если мусора больше 10%
         if garbage_ratio > 0.1:
             return True
             
-        # Дополнительная проверка на кириллицу для русскоязычных документов
-        # Если текст длинный (>50), а кириллицы < 5% и это не чистая латиница (английский), то подозрительно.
+        # Дополнительная проверка на кириллицу
         cyrillic_count = len(re.findall(r'[а-яА-ЯёЁ]', text))
         latin_count = len(re.findall(r'[a-zA-Z]', text))
         
         if text_len > 50:
-             # Если мало кириллицы И мало латиницы (например, одни цифры и спецсимволы - это ОК, но если там кракозябры...)
-             # Но кракозябры обычно попадают в garbage_ratio.
-             # Эта проверка скорее для случаев, когда кракозябры состоят из Basic Latin, но бессмысленны.
-             # Пока оставим проверку на отсутствие кириллицы, если это не английский текст.
              if cyrillic_count / text_len < 0.05 and latin_count / text_len < 0.5:
-                 # Мало кириллицы и не похоже на английский текст -> вероятно мусор
                  return True
 
         return False
 
-    def _parse_pdf(self, file_path: str) -> List[Dict[str, Any]]:
+    def _parse_pdf(self, file_path: str, max_pages: int = None) -> List[Dict[str, Any]]:
+        """
+        Парсинг PDF с таймаутом на страницу (120 секунд).
+        Страницы, которые не удалось обработать, логируются в failed_pages.jsonl
+        """
+        MAX_TIMEOUT_PER_PAGE = 120  # 2 минуты на страницу
+        
+        document_name = os.path.basename(file_path)
+        content = []
+        
+        try:
+            doc = fitz.open(file_path)
+            total_pages = len(doc) if max_pages is None else min(len(doc), max_pages)
+            
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                start_time = time.time()
+                
+                try:
+                    with timeout(MAX_TIMEOUT_PER_PAGE):
+                        # 1. Извлекаем обычный текст
+                        page_text = page.get_text()
+                        
+                        # Проверка на мусор
+                        if self._is_garbage(page_text):
+                            logger.warning(f"Обнаружен мусорный текст на стр. {page_num + 1}. Применяем полный OCR страницы.")
+                            try:
+                                # Конвертируем страницу PDF в изображение
+                                images = convert_from_path(
+                                    file_path, 
+                                    first_page=page_num+1, 
+                                    last_page=page_num+1, 
+                                    dpi=70,
+                                    fmt='jpeg',
+                                    grayscale=True
+                                )
+                                if images:
+                                    # OCR
+                                    page_text = self._extract_text_with_tesseract(images[0])
+                                    images[0].close()
+                                    del images
+                                    logger.info(f"OCR выполнен успешно для стр. {page_num + 1}")
+                            except TimeoutError:
+                                raise
+                            except Exception as ocr_e:
+                                logger.error(f"Ошибка полного OCR страницы {page_num + 1}: {ocr_e}")
+                                page_text = "" 
+
+                        # 2. Ищем изображения на странице (схемы, сканы) - ТОЛЬКО если мы не делали полный OCR
+                        if not self._is_garbage(page.get_text()):
+                             image_list = page.get_images(full=True)
+                             if image_list:
+                                logger.info(f"Найдено {len(image_list)} изображений на стр. {page_num + 1}")
+                                for img_index, img in enumerate(image_list):
+                                    try:
+                                        xref = img[0]
+                                        base_image = doc.extract_image(xref)
+                                        image_bytes = base_image["image"]
+                                        
+                                        # Загружаем в PIL
+                                        image = Image.open(io.BytesIO(image_bytes))
+                                        
+                                        # Фильтр: пропускаем слишком маленькие иконки/линии
+                                        if image.width < 50 or image.height < 50:
+                                            continue
+
+                                        # Выполняем OCR
+                                        extracted_text = self._extract_text_with_tesseract(image)
+                                        if len(extracted_text) > 10: 
+                                            content.append({
+                                                'content': f"[Текст из изображения/схемы]:\n{extracted_text}",
+                                                'page_number': page_num + 1,
+                                                'type': 'image_text'
+                                            })
+                                    except TimeoutError:
+                                        raise
+                                    except Exception as img_e:
+                                        logger.warning(f"Ошибка обработки изображения на стр. {page_num + 1}: {img_e}")
+
+                        # Добавляем основной текст страницы
+                        if page_text.strip():
+                            content.append({
+                                'content': page_text.strip(),
+                                'page_number': page_num + 1,
+                                'type': 'text' if not self._is_garbage(page.get_text()) else 'ocr_text'
+                            })
+                        
+                        processing_time = time.time() - start_time
+                        logger.info(f"Страница {page_num + 1} обработана за {processing_time:.2f}с")
+                        
+                except TimeoutError:
+                    processing_time = time.time() - start_time
+                    error_msg = f"Timeout ({MAX_TIMEOUT_PER_PAGE}s exceeded)"
+                    logger.error(f"⏱️ Таймаут на странице {page_num + 1}: {processing_time:.2f}с")
+                    
+                    # Логируем в failed_pages.jsonl
+                    failed_pages_logger.log_failed_page(
+                        document_name=document_name,
+                        page_number=page_num + 1,
+                        reason=error_msg,
+                        processing_time=processing_time
+                    )
+                    
+                    # Добавляем заметку о пропущенной странице
+                    content.append({
+                        'content': f"[СТРАНИЦА {page_num + 1} НЕ ОБРАБОТАНА: Превышен таймаут {MAX_TIMEOUT_PER_PAGE}с]",
+                        'page_number': page_num + 1,
+                        'type': 'failed'
+                    })
+                    
+                except Exception as page_error:
+                    processing_time = time.time() - start_time
+                    error_msg = f"Error: {str(page_error)[:200]}"
+                    logger.error(f"❌ Ошибка на странице {page_num + 1}: {error_msg}")
+                    
+                    # Логируем в failed_pages.jsonl
+                    failed_pages_logger.log_failed_page(
+                        document_name=document_name,
+                        page_number=page_num + 1,
+                        reason=error_msg,
+                        processing_time=processing_time
+                    )
+                    
+                    # Продолжаем обработку следующих страниц
+                    content.append({
+                        'content': f"[СТРАНИЦА {page_num + 1} НЕ ОБРАБОТАНА: {error_msg}]",
+                        'page_number': page_num + 1,
+                        'type': 'failed'
+                    })
+            
+            # Группируем контент по страницам
+            page_contents = {}
+            for item in content:
+                pn = item['page_number']
+                if pn not in page_contents:
+                    page_contents[pn] = []
+                page_contents[pn].append(item['content'])
+                
+            # Формируем итоговый список
+            result = []
+            for pn in sorted(page_contents.keys()):
+                full_text = "\n\n".join(page_contents[pn])
+                result.append({
+                    'content': full_text,
+                    'page_number': pn,
+                    'type': 'mixed'
+                })
+            
+            return result
+
+        except Exception as e:
+            logger.error(f"Ошибка PyMuPDF: {e}")
+            return []
+
+    def _parse_pdf_old(self, file_path: str, max_pages: int = None) -> List[Dict[str, Any]]:
         """
         Парсинг PDF: текст + изображения (OCR).
-        Если текст страницы похож на мусор, страница конвертируется в изображение и OCR-ится целиком.
+        СТАРАЯ ВЕРСИЯ БЕЗ ТАЙМАУТА (оставлена как резерв)
         """
         content = []
         try:
             doc = fitz.open(file_path)
             for page_num, page in enumerate(doc):
+                if max_pages and page_num >= max_pages:
+                    logger.info(f"Достигнут лимит страниц ({max_pages}). Остановка парсинга.")
+                    break
+                
                 # 1. Извлекаем обычный текст
                 page_text = page.get_text()
                 
@@ -179,13 +378,12 @@ class DocumentParser:
                     logger.warning(f"Обнаружен мусорный текст на стр. {page_num + 1}. Применяем полный OCR страницы.")
                     try:
                         # Конвертируем страницу PDF в изображение
-                        # Используем pdf2image с пониженным DPI для экономии памяти (200 достаточно для текста)
-                        images = convert_from_path(file_path, first_page=page_num+1, last_page=page_num+1, dpi=200)
+                        # DPI=70 для скорости, fmt='jpeg' (хотя convert_from_path возвращает PIL, внутренне это может влиять на скорость рендеринга poppler)
+                        images = convert_from_path(file_path, first_page=page_num+1, last_page=page_num+1, dpi=70)
                         if images:
-                            # Освобождаем память, закрывая doc на время (хотя fitz держит файл открытым)
-                            # Лучше просто обработать и удалить ссылку на image сразу
-                            page_text = self._perform_ocr(images[0])
-                            images[0].close() # Явное закрытие
+                            # OCR
+                            page_text = self._extract_text_with_tesseract(images[0])
+                            images[0].close()
                             del images
                             logger.info(f"OCR выполнен успешно для стр. {page_num + 1}")
                     except Exception as ocr_e:
@@ -193,21 +391,15 @@ class DocumentParser:
                         page_text = "" 
 
                 # 2. Ищем изображения на странице (схемы, сканы) - ТОЛЬКО если мы не делали полный OCR
-                # Если мы сделали полный OCR, то картинки уже распознаны в составе страницы
-                ocr_text_list = []
-                # Проверяем, делали ли мы полный OCR (если page_text был заменен)
-                # Но page_text мог быть заменен на результат OCR, который тоже содержит текст.
-                # Флаг garbage_detected был бы удобнее, но мы уже внутри цикла.
-                # Просто проверим, не вызывали ли мы convert_from_path
+                # Если текст был мусором, мы его заменили через OCR всей страницы.
+                # Проверяем снова, является ли текущий page_text (возможно обновленный) мусором? 
+                # Нет, если мы сделали OCR, то у нас есть текст.
+                # Но если мы НЕ делали OCR (текст был норм), то ищем картинки.
                 
-                # Упрощение: если текст был мусором, мы его заменили. 
-                # Если мы заменили текст через OCR всей страницы, то отдельные картинки извлекать не нужно.
+                # Логика: если мы НЕ вызывали convert_from_path, то ищем картинки.
+                # Но у нас нет флага. Проще проверить: если page.get_text() был норм, то ищем картинки.
                 
-                # Но fitz.open открыт.
-                # Давайте сделаем так: если текст нормальный, то ищем картинки.
-                # Если текст был мусором, мы уже получили всё через OCR.
-                
-                if not self._is_garbage(page.get_text()): # Проверяем ИСХОДНЫЙ текст страницы снова (немного неэффективно, но надежно)
+                if not self._is_garbage(page.get_text()):
                      image_list = page.get_images(full=True)
                      if image_list:
                         logger.info(f"Найдено {len(image_list)} изображений на стр. {page_num + 1}")
@@ -225,24 +417,58 @@ class DocumentParser:
                                     continue
 
                                 # Выполняем OCR
-                                extracted_text = self._perform_ocr(image)
-                                if len(extracted_text) > 10: # Игнорируем мусор
-                                    ocr_text_list.append(f"[Текст из изображения/схемы]:\n{extracted_text}")
+                                extracted_text = self._extract_text_with_tesseract(image)
+                                if len(extracted_text) > 10: 
+                                    content.append({
+                                        'content': f"[Текст из изображения/схемы]:\n{extracted_text}",
+                                        'page_number': page_num + 1,
+                                        'type': 'image_text'
+                                    })
                             except Exception as img_e:
                                 logger.warning(f"Ошибка обработки изображения на стр. {page_num + 1}: {img_e}")
 
-                # Объединяем текст страницы и текст из картинок
-                full_page_content = page_text
-                if ocr_text_list:
-                    full_page_content += "\n\n" + "\n---\n".join(ocr_text_list)
-
-                if full_page_content.strip():
+                # Добавляем основной текст страницы
+                if page_text.strip():
                     content.append({
-                        'content': full_page_content.strip(),
+                        'content': page_text.strip(),
                         'page_number': page_num + 1,
-                        'type': 'mixed'
+                        'type': 'text' if not self._is_garbage(page.get_text()) else 'ocr_text'
                     })
-            return content
+            
+            # Объединяем контент страницы? 
+            # В оригинале было: content.append({'content': full_page_content ...})
+            # Здесь я добавлял image_text отдельно в content list.
+            # Лучше следовать структуре оригинала: один элемент на страницу или список элементов?
+            # Оригинал возвращал список словарей.
+            # Моя новая логика добавляет image_text как отдельные элементы. Это нормально для RAG.
+            # Но чтобы сохранить совместимость, лучше склеить, если ожидается один блок на страницу?
+            # В оригинале: full_page_content = page_text + ocr_text_list.
+            # Давайте вернемся к склеиванию, чтобы не ломать логику чанков (если она завязана на страницы).
+            
+            # Переделываем сборку контента
+            final_content = []
+            
+            # Группируем по страницам
+            page_contents = {} # page_num -> list of text
+            
+            for item in content:
+                pn = item['page_number']
+                if pn not in page_contents:
+                    page_contents[pn] = []
+                page_contents[pn].append(item['content'])
+                
+            # Формируем итоговый список
+            result = []
+            for pn in sorted(page_contents.keys()):
+                full_text = "\n\n".join(page_contents[pn])
+                result.append({
+                    'content': full_text,
+                    'page_number': pn,
+                    'type': 'mixed'
+                })
+            
+            return result
+
         except Exception as e:
             logger.error(f"Ошибка PyMuPDF: {e}")
             return []
@@ -250,7 +476,6 @@ class DocumentParser:
     def _parse_via_pdf_conversion(self, file_path: str) -> List[Dict[str, Any]]:
         """
         Конвертирует DOCX/DOC/RTF в PDF, затем парсит PDF.
-        Это позволяет извлечь и текст, и картинки (через OCR в _parse_pdf), и сохранить номера страниц.
         """
         pdf_path = None
         try:
@@ -258,7 +483,6 @@ class DocumentParser:
             os.close(pdf_fd)
 
             logger.info("Конвертация файла в PDF...")
-            # Используем xelatex или wkhtmltopdf движок
             pypandoc.convert_file(
                 file_path, 
                 'pdf', 
@@ -266,7 +490,6 @@ class DocumentParser:
                 extra_args=['--pdf-engine=xelatex'] 
             )
 
-            # Рекурсивно вызываем парсер PDF
             return self._parse_pdf(pdf_path)
 
         except Exception as e:
@@ -280,7 +503,7 @@ class DocumentParser:
         """Парсинг отдельного файла изображения."""
         try:
             image = Image.open(file_path)
-            text = self._perform_ocr(image)
+            text = self._extract_text_with_tesseract(image)
             return [{
                 'content': text,
                 'page_number': 1,
@@ -297,11 +520,9 @@ class DocumentParser:
             xls = pd.ExcelFile(file_path)
             for i, sheet_name in enumerate(xls.sheet_names):
                 df = pd.read_excel(xls, sheet_name=sheet_name)
-                # Чистка пустых данных
                 df = df.dropna(how='all').dropna(axis=1, how='all')
                 
                 if not df.empty:
-                    # Конвертация в Markdown сохраняет структуру таблицы
                     text = df.to_markdown(index=False)
                     content.append({
                         'content': f"Таблица (Лист: {sheet_name}):\n{text}",

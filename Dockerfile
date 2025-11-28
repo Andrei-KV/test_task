@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y \
 
 # Копирование файлов проекта
 WORKDIR /app
-COPY pyproject.toml ./
+COPY pyproject.toml poetry.lock ./
 
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
-    poetry install --only main --no-root
+    poetry install --only main --no-root --no-interaction
 
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
@@ -25,6 +25,8 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr-rus \
     pandoc \
     poppler-utils \
+    libgl1 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка переменных окружения

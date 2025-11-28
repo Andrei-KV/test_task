@@ -3,7 +3,7 @@ __pycache__/
 *.log
 draft.txt
 *.json
-*.env
+.env
 test_file.py
 clear_qdrant.py
 google_drive_listener.py
@@ -15,7 +15,7 @@ test_file_2.py
 test_select_chunks.py
 test_chunks_doc1.txt
 test_pipeline_quick.py
-test_process_new_documents_test.py
+# test_process_new_documents_test.py
 test_websocket_manager.py
 test_chat.py
 test_document_processor.py
@@ -32,5 +32,16 @@ app.log*
 # Test pipeline output files
 test_output.txt
 test_output_*.txt
+0412-1-2023-ЭОМ -Электроснабжение,электроосвещение и силовое электрооборудование.pdf
 
 implementation_plan.md
+
+# Temporary test files and scripts
+test_chunking_simple.py
+test_chunking_two_docs.py
+test_chunks_simple.txt
+test_garbage_detection.py
+test_paddle_minimal.py
+chunks_verification.txt
+chunks_verification_new.txt
+verify_ingestion.py
