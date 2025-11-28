@@ -11,9 +11,7 @@ SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT_FILE')
 TARGET_FOLDER_ID = os.getenv('TARGET_FOLDER_ID')
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-# Qdrant configuration
-QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
-COLLECTION_NAME = os.getenv('COLLECTION_NAME')
+
 
 # OpenSearch configuration
 OPENSEARCH_HOST = os.getenv("OPENSEARCH_HOST", "localhost")
