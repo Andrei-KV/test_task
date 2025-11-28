@@ -255,7 +255,7 @@ class QueryOpenSearchClient:
                 logger.error("Selected chunks are missing 'chunk_id'.")
                 return [], None, 0
             
-            return sorted(list(target_chunk_ids)), target_document_id, max_score
+            return sorted(list(target_chunk_ids)), target_document_id, first_candidate['score']
             
         except Exception as e:
             logger.error(f"Error during hybrid search: {e}")
