@@ -19,7 +19,8 @@ class DocumentProcessorService:
         file_name: str, 
         mime_type: str,
         document_id: int,
-        document_title: str
+        document_title: str,
+        max_pages: int = None
     ) -> List[Dict[str, Any]]:
         """
         Full pipeline: Downloaded bytes -> Parsed Pages -> Chunks with Metadata.
@@ -27,7 +28,7 @@ class DocumentProcessorService:
         logger.info(f"Starting processing pipeline for: {file_name}")
 
         # 1. Parse
-        parsed_pages = document_parser.parse_file(file_content, file_name, mime_type)
+        parsed_pages = document_parser.parse_file(file_content, file_name, mime_type, max_pages=max_pages)
         
         if not parsed_pages:
             logger.warning(f"No content extracted from {file_name}")

@@ -1,11 +1,12 @@
 """
-Тест полного цикла обработки одного документа с Gemini embeddings.
-Скачивает первый файл из Google Drive, обрабатывает его, генерирует эмбеддинги через Gemini API.
-НЕ сохраняет в базу данных - только проверяет корректность работы.
+Тестовый скрипт для анализа проблемы с garbage detection.
+Скачивает только файл 0412-1-2023-ЭОМ с Google Drive, парсит его и сохраняет чанки.
 """
+import asyncio
 import logging
-from google import genai
-from src.config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID, GEMINI_API_KEY, EMBEDDING_MODEL_NAME
+from pathlib import Path
+
+from src.config import SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID
 from src.services.google_drive import (
     download_drive_file_content,
     init_drive_service,
@@ -15,124 +16,129 @@ from src.services.document_processor_service import document_processor_service
 
 # Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Проверка переменных окружения
-if not all([SERVICE_ACCOUNT_FILE, TARGET_FOLDER_ID, GEMINI_API_KEY, EMBEDDING_MODEL_NAME]):
-    raise ValueError("Переменные окружения не найдены. Проверьте файл .env.")
+# Variables check
+if (SERVICE_ACCOUNT_FILE is None) or (TARGET_FOLDER_ID is None):
+    raise ValueError("Переменные не найдены. Проверьте файл .env.")
 
 
-def test_single_document_processing():
-    """Тестирует полный цикл на первом документе из Google Drive."""
-    logger.info("=" * 80)
-    logger.info("ТЕСТ ОБРАБОТКИ ОДНОГО ДОКУМЕНТА С GEMINI EMBEDDINGS")
-    logger.info("=" * 80)
+async def test_single_document():
+    """Тестирует обработку одного документа 0412-1-2023-ЭОМ."""
+    logger.info("="*60)
+    logger.info("ТЕСТ: Обработка документа 0412-1-2023-ЭОМ")
+    logger.info("="*60)
     
-    # 1. Инициализация Google Drive
-    drive_service = init_drive_service(SERVICE_ACCOUNT_FILE)
-    if not drive_service:
-        logger.error("Не удалось инициализировать Google Drive service.")
+    # Инициализация Google Drive (пропускаем для локального теста)
+    # drive_service = init_drive_service(SERVICE_ACCOUNT_FILE)
+    # if not drive_service:
+    #     logger.error("Failed to initialize Google Drive service.")
+    #     return
+    
+    # Используем локальный файл
+    file_name = "0412-1-2023-ЭОМ -Электроснабжение,электроосвещение и силовое электрооборудование.pdf"
+    local_path = Path(file_name)
+    
+    if not local_path.exists():
+        logger.error(f"❌ Файл '{file_name}' не найден локально!")
+        return
+        
+    file_id = "local_test_id"
+    file_mime_type = "application/pdf"
+    
+    logger.info(f"\n✅ Используем локальный файл: {file_name}")
+    
+    # Читаем файл
+    logger.info(f"\n{'='*60}")
+    logger.info("ЧТЕНИЕ ФАЙЛА")
+    logger.info(f"{'='*60}")
+    
+    try:
+        with open(local_path, "rb") as f:
+            raw_content_bytes = f.read()
+    except Exception as e:
+        logger.error(f"❌ Ошибка чтения файла: {e}")
         return
     
-    # 2. Получение списка файлов
-    files_in_folder = list_files_in_folder(drive_service, TARGET_FOLDER_ID)
-    if not files_in_folder:
-        logger.info("Файлы не найдены в целевой папке.")
-        return
+    logger.info(f"✅ Файл прочитан: {len(raw_content_bytes)} байт")
     
-    logger.info(f"Найдено {len(files_in_folder)} файлов в папке.")
-    logger.info("Обработка ПЕРВОГО файла для теста...\n")
-    
-    # 3. Берем первый файл
-    file_info = files_in_folder[0]
-    file_id = file_info["ID Файла"]
-    file_name = file_info["Имя Файла"]
-    file_mime_type = file_info["MIME Тип"]
-    
-    logger.info(f"Файл: {file_name}")
-    logger.info(f"MIME: {file_mime_type}")
-    logger.info(f"ID: {file_id}\n")
-    
-    # 4. Скачивание файла
-    logger.info("Скачивание файла...")
-    raw_content_bytes = download_drive_file_content(drive_service, file_id, file_name)
-    if raw_content_bytes is None:
-        logger.error("Не удалось скачать файл.")
-        return
-    
-    logger.info(f"Скачано {len(raw_content_bytes)} байт.\n")
-    
-    # 5. Обработка через DocumentProcessorService
-    logger.info("Запуск пайплайна обработки (парсинг + чанкинг)...")
-    logger.info("-" * 80)
+    # Обрабатываем документ через pipeline
+    logger.info(f"\n{'='*60}")
+    logger.info("ОБРАБОТКА ДОКУМЕНТА (парсинг + чанкинг)")
+    logger.info(f"{'='*60}")
     
     chunks_data = document_processor_service.process_document(
         file_content=raw_content_bytes,
         file_name=file_name,
         mime_type=file_mime_type,
-        document_id=999,  # Тестовый ID
-        document_title=file_name
+        document_id=999,  # Фиктивный ID для теста
+        document_title=file_name,
+        max_pages=1
     )
     
-    logger.info("-" * 80)
-    
     if not chunks_data:
-        logger.warning("Не удалось создать чанки.")
+        logger.warning(f"❌ Could not create chunks for document: {file_name}")
         return
     
-    logger.info(f"\n✅ Создано {len(chunks_data)} чанков.\n")
+    logger.info(f"\n✅ Создано чанков: {len(chunks_data)}")
     
-    # 6. Генерация эмбеддингов через Gemini API (тестируем первые 3 чанка)
-    logger.info("=" * 80)
-    logger.info("ТЕСТИРОВАНИЕ ГЕНЕРАЦИИ ЭМБЕДДИНГОВ ЧЕРЕЗ GEMINI API")
-    logger.info("=" * 80)
+    # Сохраняем результаты в файл
+    output_file = "chunks_verification_new.txt"
+    logger.info(f"\n{'='*60}")
+    logger.info(f"СОХРАНЕНИЕ РЕЗУЛЬТАТОВ В {output_file}")
+    logger.info(f"{'='*60}")
     
-    test_chunks = chunks_data[:3]  # Берем только первые 3 для теста
-    logger.info(f"Генерация эмбеддингов для {len(test_chunks)} чанков...\n")
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(f"Анализ документа: {file_name}\n")
+        f.write(f"{'='*80}\n\n")
+        f.write(f"Общая информация:\n")
+        f.write(f"  - Размер файла: {len(raw_content_bytes)} байт\n")
+        f.write(f"  - Создано чанков: {len(chunks_data)}\n")
+        f.write(f"  - MIME тип: {file_mime_type}\n")
+        f.write(f"\n{'='*80}\n\n")
+        
+        # Записываем все чанки
+        for i, chunk_data in enumerate(chunks_data, 1):
+            f.write(f"[Chunk {i} | Page {chunk_data.get('page_number', '?')}]\n")
+            f.write(f"Документ: {file_name}. Стр: {chunk_data.get('page_number', '?')}.\n")
+            f.write(f"{chunk_data['content']}\n\n")
+            f.write(f"{'-'*80}\n\n")
     
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    logger.info(f"✅ Результаты сохранены в {output_file}")
     
-    for i, chunk in enumerate(test_chunks, 1):
-        try:
-            logger.info(f"Чанк {i}/{len(test_chunks)}:")
-            logger.info(f"  Страница: {chunk.get('page_number', 'N/A')}")
-            logger.info(f"  Тип: {chunk.get('type', 'N/A')}")
-            logger.info(f"  Длина контента: {len(chunk['content'])} символов")
-            
-            # Генерация эмбеддинга
-            result = client.models.embed_content(
-                model=EMBEDDING_MODEL_NAME,
-                contents=chunk['content'],
-                config=genai.types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT",
-                    output_dimensionality=3072
-                )
-            )
-            
-            embedding = result.embeddings[0].values
-            dim = len(embedding)
-            
-            logger.info(f"  ✅ Эмбеддинг сгенерирован: размерность {dim}")
-            logger.info(f"  Первые 5 значений: {embedding[:5]}\n")
-            
-            if dim != 3072:
-                logger.error(f"  ❌ ОШИБКА: Неверная размерность! Ожидалось 3072, получено {dim}")
-                
-        except Exception as e:
-            logger.error(f"  ❌ Ошибка генерации эмбеддинга для чанка {i}: {e}\n")
-            continue
+    # Анализ первого чанка
+    logger.info(f"\n{'='*60}")
+    logger.info("АНАЛИЗ ПЕРВОГО ЧАНКА")
+    logger.info(f"{'='*60}")
     
-    logger.info("=" * 80)
-    logger.info("ТЕСТ ЗАВЕРШЕН УСПЕШНО")
-    logger.info("=" * 80)
-    logger.info(f"Обработано чанков: {len(chunks_data)}")
-    logger.info(f"Протестировано эмбеддингов: {len(test_chunks)}")
-    logger.info("Модель: " + EMBEDDING_MODEL_NAME)
-    logger.info("Размерность: 3072")
+    if chunks_data:
+        first_chunk = chunks_data[0]['content']
+        logger.info(f"\nДлина: {len(first_chunk)} символов")
+        logger.info(f"Первые 500 символов:")
+        logger.info(f"{'-'*60}")
+        logger.info(first_chunk[:500])
+        logger.info(f"{'-'*60}")
+        
+        # Проверка на мусор
+        import re
+        allowed_pattern = re.compile(r'[а-яА-ЯёЁa-zA-Z0-9\s.,;:!?()\[\]{}"\'\-_+=/\\|%@#№$€£*<>&]')
+        garbage_chars = [c for c in first_chunk[:1000] if not allowed_pattern.match(c)]
+        
+        logger.info(f"\n📊 Анализ на мусор (первые 1000 символов):")
+        logger.info(f"   Мусорных символов: {len(garbage_chars)}")
+        logger.info(f"   Процент мусора: {len(garbage_chars) / min(1000, len(first_chunk)) * 100:.2f}%")
+        
+        if garbage_chars:
+            logger.info(f"   Примеры мусорных символов (первые 50):")
+            logger.info(f"   {garbage_chars[:50]}")
+    
+    logger.info(f"\n{'='*60}")
+    logger.info("✅ ТЕСТ ЗАВЕРШЕН!")
+    logger.info(f"{'='*60}")
+    logger.info(f"\n📝 Проверьте файл {output_file} для детального анализа")
 
 
 if __name__ == "__main__":
-    test_single_document_processing()
+    asyncio.run(test_single_document())

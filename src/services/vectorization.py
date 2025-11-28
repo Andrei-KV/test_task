@@ -20,6 +20,10 @@ if (OPENSEARCH_HOST is None) or (OPENSEARCH_INDEX is None) or (EMBEDDING_MODEL_N
 from google import genai
 from src.config import GEMINI_API_KEY, EMBEDDING_DIMENSION
 
+import time
+import random
+from google.genai.errors import ClientError
+
 class EmbeddingService:
     """Инкапсулирует клиент Gemini и логику векторизации."""
     
@@ -29,28 +33,51 @@ class EmbeddingService:
         self.vector_dimension = EMBEDDING_DIMENSION
 
     def vectorize_chunks(self, chunks: list[str]) -> list[list[float]]:
-        """Векторизует список текстовых фрагментов, используя Gemini API."""
+        """Векторизует список текстовых фрагментов, используя Gemini API с повторными попытками."""
         logger.info("Vectorizing user file with Gemini...")
         embeddings = []
-        # Gemini API doesn't support batch embedding in the same way as SentenceTransformer
-        # We need to iterate or use batch methods if available. 
-        # For now, simple iteration to ensure correctness.
+        
         for chunk in chunks:
-            try:
-                result = self.__client.models.embed_content(
-                    model=self.__model_name,
-                    contents=chunk,
-                    config=genai.types.EmbedContentConfig(
-                        task_type="RETRIEVAL_DOCUMENT",
-                        output_dimensionality=self.vector_dimension
+            max_retries = 5
+            base_delay = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    result = self.__client.models.embed_content(
+                        model=self.__model_name,
+                        contents=chunk,
+                        config=genai.types.EmbedContentConfig(
+                            task_type="RETRIEVAL_DOCUMENT",
+                            output_dimensionality=self.vector_dimension
+                        )
                     )
-                )
-                embeddings.append(result.embeddings[0].values)
-            except Exception as e:
-                logger.error(f"Error embedding chunk: {e}")
-                # Append zero vector or handle error? 
-                # For now, raising to fail fast in tests
-                raise e
+                    embeddings.append(result.embeddings[0].values)
+                    break # Success, exit retry loop
+                    
+                except ClientError as e:
+                    if e.code == 429:
+                        if attempt < max_retries - 1:
+                            delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                            logger.warning(f"⚠️ Quota exceeded (429). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            logger.error(f"❌ Max retries exceeded for 429 error: {e}")
+                            raise e
+                    else:
+                        logger.error(f"❌ Gemini ClientError: {e}")
+                        raise e
+                except Exception as e:
+                    # Check if it's a 429 wrapped in another exception
+                    if "429" in str(e):
+                         if attempt < max_retries - 1:
+                            delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                            logger.warning(f"⚠️ Quota exceeded (429/Exception). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                            time.sleep(delay)
+                            continue
+                    
+                    logger.error(f"❌ Error embedding chunk: {e}")
+                    raise e
                 
         logger.info("Text vectorized successfully.")
         return embeddings
@@ -121,6 +148,7 @@ class OpenSearchClientWrapper:
                 logger.info(f"✅ Index '{self.__index_name}' already exists.")
         except Exception as e:
             logger.error(f"❌ OpenSearch error: {e}. Make sure OpenSearch is running.")
+            raise e # Fail fast if OpenSearch is down
 
     def bulk_index(self, actions: list):
         """Загружает (bulk index) документы в индекс."""
