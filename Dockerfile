@@ -41,10 +41,13 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Копирование исходного кода приложения
 COPY src ./src
 COPY main.py .
-COPY rag-test-task-743ae7e0d95d.json .
 COPY process_new_documents_test.py .
 COPY delete_document.py .
 COPY clear_databases.py .
+
+# Создание непривилегированного пользователя
+RUN useradd --create-home appuser
+USER appuser
 
 # Запуск приложения
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150"]
