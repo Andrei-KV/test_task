@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 def get_postgres_url(original_url):
     """Заменяем хост контейнера на localhost и порт на внешний (7350)."""
+    if os.getenv("RUNNING_IN_DOCKER") == "true":
+        return original_url
+        
     if "legal_rag_postgres" in original_url:
         return original_url.replace("legal_rag_postgres:5432", "localhost:7350")
     if "postgres" in original_url and "localhost" not in original_url:
@@ -31,6 +34,9 @@ def get_postgres_url(original_url):
 
 def get_opensearch_host(original_host):
     """Заменяем хост контейнера на localhost."""
+    if os.getenv("RUNNING_IN_DOCKER") == "true":
+        return original_host
+        
     if original_host == "opensearch":
         return "localhost"
     return original_host
