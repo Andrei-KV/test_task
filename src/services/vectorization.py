@@ -39,7 +39,7 @@ class EmbeddingService:
         
         for chunk in chunks:
             max_retries = 5
-            base_delay = 2
+            base_delay = 5
             
             for attempt in range(max_retries):
                 try:
