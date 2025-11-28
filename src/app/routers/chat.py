@@ -5,9 +5,45 @@ from ..dependencies.context import get_context_manager
 from ...services.rag_service_opensearch import RAGService
 from ...services.context_manager import ContextManagerService
 from src.app.logging_config import get_logger
+from ....src.config import SCORE_THRESHOLD
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["chat"])
+
+async def _handle_low_score(
+    client_id: str,
+    data: str,
+    rag_service: RAGService,
+    context_manager: ContextManagerService,
+    websocket: WebSocket,
+):
+    """Handles the case where the RAG service returns a low score."""
+    clarification_count = await context_manager.get_clarification_count(client_id)
+    if clarification_count < 1:
+        await context_manager.increment_clarification_count(client_id)
+        clarification_question = "Не могли бы вы уточнить вопрос?"
+        await context_manager.add_message(client_id, "bot", clarification_question)
+        await manager.send_personal_message(
+            text=clarification_question, websocket=websocket
+        )
+    else:
+        await context_manager.reset_context(client_id)
+        answer, web_link, score, title, page_numbers = await rag_service.aquery(
+            data, low_precision=True
+        )
+        warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
+        final_answer = f"{warning}\n\n{answer}"
+        await context_manager.add_message(client_id, "bot", final_answer)
+        await manager.send_personal_message(
+            text=final_answer,
+            websocket=websocket,
+            web_link=web_link,
+            title=title,
+            page_numbers=page_numbers,
+        )
+        # Reset context after providing a low-precision answer
+        await context_manager.reset_context(client_id)
+
 
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(
@@ -20,68 +56,62 @@ async def websocket_endpoint(
     # Send history to user on connect
     history = await context_manager.get_full_history(client_id)
     for message in history:
-        await manager.send_personal_message(text=f"{message['role']}: {message['content']}", websocket=websocket)
-
+        await manager.send_personal_message(
+            text=f"{message['role']}: {message['content']}", websocket=websocket
+        )
 
     try:
         while True:
             data = await websocket.receive_text()
             await context_manager.add_message(client_id, "user", data)
-            
+
             # Send "Processing..." message with loading indicator
-            await manager.send_personal_message(text="Идёт обработка...", websocket=websocket, is_loading=True)
+            await manager.send_personal_message(
+                text="Идёт обработка...", websocket=websocket, is_loading=True
+            )
 
             history = await context_manager.get_full_history(client_id)
             context_query = ""
 
-            # The most recent message is the user's current input, which is at history[-1]
-            is_clarification_response = False
-            if len(history) >= 2:
-                if history[-2].get("role") == "bot" and "уточнить вопрос" in history[-2].get("content", ""):
-                    is_clarification_response = True
-            
+            # Determine if the user is responding to a clarification question
+            is_clarification_response = (
+                len(history) >= 2
+                and history[-2].get("role") == "bot"
+                and "уточнить вопрос" in history[-2].get("content", "")
+            )
+
             if is_clarification_response:
-                # Find the user's original question (before the bot's clarification request)
+                # Find the user's original question
                 original_question = ""
                 for message in reversed(history[:-2]):
                     if message.get("role") == "user":
                         original_question = message.get("content")
                         break
-                
-                if original_question:
-                    # Combine original question with the user's new clarifying answer, excluding the bot's message
-                    context_query = f"{original_question} {data}"
-                else:
-                    # Fallback to just the current message if the original couldn't be found
-                    context_query = data
+                context_query = f"{original_question} {data}" if original_question else data
             else:
-                # Default context window for new questions
+                # Use the current context window
                 context_window = await context_manager.get_context_window(client_id)
                 context_query = " ".join([msg["content"] for msg in context_window])
-            
-            logger.info(f'Context query: {context_query}')
-            answer, web_link, score, title, page_numbers = await rag_service.aquery(context_query)
-            logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
 
-            if score < 0.74:
-                clarification_count = await context_manager.get_clarification_count(client_id)
-                if clarification_count < 1:
-                    await context_manager.increment_clarification_count(client_id)
-                    clarification_question = "Не могли бы вы уточнить вопрос?"
-                    await context_manager.add_message(client_id, "bot", clarification_question)
-                    await manager.send_personal_message(text=clarification_question, websocket=websocket)
-                else:
-                    await context_manager.reset_context(client_id)
-                    answer, web_link, score, title, page_numbers = await rag_service.aquery(data, low_precision=True)
-                    warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
-                    final_answer = f"{warning}\n\n{answer}"
-                    await context_manager.add_message(client_id, "bot", final_answer)
-                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
-                    #  Reset context after providing a low-precision answer
-                    await context_manager.reset_context(client_id)
+            logger.info(f"Context query: {context_query}")
+            answer, web_link, score, title, page_numbers = await rag_service.aquery(
+                context_query
+            )
+            logger.info(f"answer: {answer} \nweb_link: {web_link} \nscore: {score}")
+
+            if score < SCORE_THRESHOLD:
+                await _handle_low_score(
+                    client_id, data, rag_service, context_manager, websocket
+                )
             else:
                 await context_manager.add_message(client_id, "bot", answer)
-                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
+                await manager.send_personal_message(
+                    text=answer,
+                    websocket=websocket,
+                    web_link=web_link,
+                    title=title,
+                    page_numbers=page_numbers,
+                )
                 # Reset context after a successful answer
                 await context_manager.reset_context(client_id)
 

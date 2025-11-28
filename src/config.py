@@ -39,3 +39,7 @@ REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 
 # Telegram bot configuration
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+
+# RAG configuration
+SCORE_THRESHOLD = 0.74
+MAX_CONTEXT_TOKENS = 3000
