@@ -5,7 +5,7 @@ import mimetypes
 import io
 import re
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 # Библиотеки для обработки форматов
 import pypandoc
@@ -111,55 +111,137 @@ class DocumentParser:
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
+    def _detect_columns(self, data: dict, image_width: int, confidence_threshold: int = 70) -> List[Tuple[int, int]]:
+        """
+        Определяет границы колонок на основе распределения текста по горизонтали.
+        """
+        x_positions = []
+        n_boxes = len(data['text'])
+        
+        for i in range(n_boxes):
+            conf = float(data['conf'][i])
+            text = data['text'][i].strip()
+            
+            if int(conf) > confidence_threshold and text:
+                left = data['left'][i]
+                width = data['width'][i]
+                x_positions.append((left, left + width))
+        
+        if not x_positions:
+            return [(0, image_width)]
+        
+        centers = [(left + right) / 2 for left, right in x_positions]
+        centers.sort()
+        
+        mid_point = image_width / 2
+        left_centers = [c for c in centers if c < mid_point]
+        right_centers = [c for c in centers if c >= mid_point]
+        
+        if len(left_centers) > 5 and len(right_centers) > 5:
+            max_left = max(left_centers) if left_centers else 0
+            min_right = min(right_centers) if right_centers else image_width
+            boundary = (max_left + min_right) / 2
+            return [(0, int(boundary)), (int(boundary), image_width)]
+        else:
+            return [(0, image_width)]
+
+    def _extract_text_blocks(self, data: dict, confidence_threshold: int = 70) -> List[Dict]:
+        """Извлекает текстовые блоки с метаданными."""
+        blocks = []
+        n_boxes = len(data['text'])
+        
+        for i in range(n_boxes):
+            conf = float(data['conf'][i])
+            text = data['text'][i].strip()
+            
+            if int(conf) > confidence_threshold and text:
+                blocks.append({
+                    'text': text,
+                    'left': data['left'][i],
+                    'top': data['top'][i],
+                    'width': data['width'][i],
+                    'height': data['height'][i],
+                    'line_num': data['line_num'][i],
+                    'block_num': data['block_num'][i],
+                    'par_num': data['par_num'][i]
+                })
+        return blocks
+
+    def _assign_blocks_to_columns(self, blocks: List[Dict], columns: List[Tuple[int, int]]) -> Dict[int, List[Dict]]:
+        """Распределяет блоки по колонкам."""
+        column_blocks = {i: [] for i in range(len(columns))}
+        
+        for block in blocks:
+            block_center = block['left'] + block['width'] / 2
+            for col_idx, (left_bound, right_bound) in enumerate(columns):
+                if left_bound <= block_center < right_bound:
+                    column_blocks[col_idx].append(block)
+                    break
+        return column_blocks
+
+    def _sort_blocks_in_reading_order(self, blocks: List[Dict]) -> List[Dict]:
+        """Сортирует блоки в порядке чтения."""
+        return sorted(blocks, key=lambda b: (b['top'], b['left']))
+
+    def _blocks_to_text(self, blocks: List[Dict], line_spacing_threshold: int = 15) -> str:
+        """Преобразует блоки в текст с учетом строк."""
+        if not blocks:
+            return ""
+        
+        lines_dict = {}
+        for block in blocks:
+            top = block['top']
+            found_line = False
+            for line_top in list(lines_dict.keys()):
+                if abs(top - line_top) <= line_spacing_threshold:
+                    lines_dict[line_top].append(block)
+                    found_line = True
+                    break
+            if not found_line:
+                lines_dict[top] = [block]
+        
+        sorted_line_tops = sorted(lines_dict.keys())
+        lines = []
+        for line_top in sorted_line_tops:
+            line_blocks = sorted(lines_dict[line_top], key=lambda b: b['left'])
+            line_text = ' '.join(b['text'] for b in line_blocks)
+            lines.append(line_text)
+        
+        return '\n'.join(lines)
+
     def _extract_text_with_tesseract(self, image: Image.Image, lang='rus+eng') -> str:
         """
-        Extract text using Tesseract with confidence filtering.
-        Only returns text if confidence > 70 (0.7).
+        Extract text using Tesseract with column detection support.
         """
         try:
-            # Используем image_to_data для получения уверенности
-            # config='--psm 6' предполагаем единый блок текста
             custom_config = r'--oem 1 --psm 6'
-            
             data = pytesseract.image_to_data(image, lang=lang, config=custom_config, output_type=Output.DICT)
             
-            extracted_words = []
-            
-            n_boxes = len(data['text'])
-            for i in range(n_boxes):
-                # data['conf'][i] может быть -1 для блоков без текста
-                conf = float(data['conf'][i])
-                text = data['text'][i].strip()
-                
-                # Фильтруем по уверенности > 70 (это 0.7 в Tesseract scale 0-100)
-                if int(conf) > 70 and text:
-                    extracted_words.append(text)
-            
-            # Если слов мало или ничего не нашли
-            if not extracted_words:
+            blocks = self._extract_text_blocks(data)
+            if not blocks:
                 return ""
-                
-            # Собираем текст обратно (просто через пробел, так как структура теряется при фильтрации слов)
-            # Для более сложной структуры нужно анализировать block_num, par_num, line_num
-            # Но для "вытащить текст из картинки" этого часто достаточно.
-            # Попробуем сохранить переносы строк, если они были в исходных блоках?
-            # image_to_data дает line_num.
             
-            # Пересборка с учетом строк:
-            lines = {}
-            for i in range(n_boxes):
-                conf = float(data['conf'][i])
-                text = data['text'][i].strip()
-                if int(conf) > 70 and text:
-                    line_num = data['line_num'][i]
-                    if line_num not in lines:
-                        lines[line_num] = []
-                    lines[line_num].append(text)
+            image_width = image.size[0]
+            columns = self._detect_columns(data, image_width)
             
-            sorted_lines = sorted(lines.keys())
-            final_text = "\n".join([" ".join(lines[ln]) for ln in sorted_lines])
+            column_blocks = self._assign_blocks_to_columns(blocks, columns)
             
-            logger.debug(f"Tesseract extracted {len(final_text)} chars with conf > 70")
+            column_texts = []
+            for col_idx in sorted(column_blocks.keys()):
+                col_blocks = column_blocks[col_idx]
+                if col_blocks:
+                    sorted_blocks = self._sort_blocks_in_reading_order(col_blocks)
+                    col_text = self._blocks_to_text(sorted_blocks)
+                    if col_text:
+                        column_texts.append(col_text)
+            
+            if len(column_texts) > 1:
+                # Используем простой разделитель для RAG, чтобы не засорять контекст
+                final_text = '\n\n'.join(column_texts)
+            else:
+                final_text = '\n'.join(column_texts)
+            
+            logger.debug(f"Tesseract extracted {len(final_text)} chars")
             return final_text.strip()
 
         except Exception as e:
@@ -203,6 +285,32 @@ class DocumentParser:
 
         return False
 
+    def _is_diagram_signature(self, text: str) -> bool:
+        """
+        Проверяет, является ли текст только подписью чертежа (штампом).
+        Обычно это означает, что основной контент - графический, и PyMuPDF извлек только текст штампа.
+        """
+        if not text or len(text) > 500: # Если текста много, это вряд ли только штамп
+            return False
+            
+        # Ключевые слова из штампов ГОСТ
+        keywords = [
+            "Изм.", "Кол.уч.", "Лист", "№ док.", "Подп.", "Дата", 
+            "Разраб.", "Пров.", "Т.контр.", "Н.контр.", "Утв.", 
+            "Стадия", "Листов", "Масштаб", "Формат"
+        ]
+        
+        found_keywords = 0
+        for kw in keywords:
+            if kw in text:
+                found_keywords += 1
+        
+        # Если найдено 3+ ключевых слова и текст короткий - это штамп
+        if found_keywords >= 3:
+            return True
+            
+        return False
+
     def _parse_pdf(self, file_path: str, max_pages: int = None) -> List[Dict[str, Any]]:
         """
         Парсинг PDF с таймаутом на страницу (120 секунд).
@@ -226,16 +334,20 @@ class DocumentParser:
                         # 1. Извлекаем обычный текст
                         page_text = page.get_text()
                         
-                        # Проверка на мусор
-                        if self._is_garbage(page_text):
-                            logger.warning(f"Обнаружен мусорный текст на стр. {page_num + 1}. Применяем полный OCR страницы.")
+                        # Проверка на мусор или только штамп чертежа
+                        is_garbage = self._is_garbage(page_text)
+                        is_signature = self._is_diagram_signature(page_text)
+                        
+                        if is_garbage or is_signature:
+                            reason = "мусорный текст" if is_garbage else "только штамп чертежа"
+                            logger.warning(f"Обнаружен {reason} на стр. {page_num + 1}. Применяем полный OCR страницы.")
                             try:
                                 # Конвертируем страницу PDF в изображение
                                 images = convert_from_path(
                                     file_path, 
                                     first_page=page_num+1, 
                                     last_page=page_num+1, 
-                                    dpi=70,
+                                    dpi=200, # Увеличили DPI до 200 для лучшего качества (было 70)
                                     fmt='jpeg',
                                     grayscale=True
                                 )
@@ -249,7 +361,11 @@ class DocumentParser:
                                 raise
                             except Exception as ocr_e:
                                 logger.error(f"Ошибка полного OCR страницы {page_num + 1}: {ocr_e}")
-                                page_text = "" 
+                                # Если OCR упал, оставляем оригинальный текст (даже если это штамп)
+                                # или пустую строку, если это мусор
+                                if is_garbage:
+                                    page_text = "" 
+
 
                         # 2. Ищем изображения на странице (схемы, сканы) - ТОЛЬКО если мы не делали полный OCR
                         if not self._is_garbage(page.get_text()):
