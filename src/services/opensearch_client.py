@@ -124,7 +124,7 @@ class QueryOpenSearchClient:
         self, 
         query_vector: List[float], 
         user_query: str, 
-        limit_k: int = 20
+        limit_k: int = 25
     ) -> tuple[List[int], Optional[int], float]:
         """
         Performs hybrid search combining knn (vector) and match (full-text) queries.

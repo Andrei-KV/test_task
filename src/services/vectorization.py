@@ -91,7 +91,8 @@ class OpenSearchClientWrapper:
             http_auth=None,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
-            ssl_show_warn=False
+            ssl_show_warn=False,
+            timeout=60  # Увеличен таймаут до 60 секунд для медленных операций
         )
         self.__index_name = index_name
 

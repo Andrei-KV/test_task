@@ -117,6 +117,7 @@ async def process_new_documents():
 
             chunk_objects_to_process = []
             for chunk_data in chunks_data:
+                logger.info(f"--- Chunk (Page {chunk_data['page_number']}) Content ---\n{chunk_data['content']}\n-----------------------------")
                 new_document_chunk = DocumentChunk(
                     document_id=document_id,
                     content=chunk_data['content'],
