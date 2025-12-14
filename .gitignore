@@ -1,47 +1,81 @@
+# Python
 .venv/
 __pycache__/
-*.log
-draft.txt
-*.json
+*.pyc
+.pytest_cache/
+
+# Environment
 .env
-test_file.py
-clear_qdrant.py
-google_drive_listener.py
 
-update_database.py
-pages_test.txt
-chunks_test2.txt
-test_file_2.py
-test_select_chunks.py
-test_chunks_doc1.txt
-test_pipeline_quick.py
-# test_process_new_documents_test.py
-test_websocket_manager.py
-test_chat.py
-test_document_processor.py
-test_rag_service.py
-verify_embeddings.py
-test_rag_service_embeddings.py
-test_opensearch_connection.py
-index_to_opensearch.py
-verify_optimization.py
-
-app.log.*
+# Logs
+*.log
 app.log*
+ocr_processing.log
+ocr_smart_processing.log
 
-# Test pipeline output files
+# Credentials
+*.json
+rag-test-task-*.json
+
+# Production files (keep these)
+# process_new_documents_test.py
+# document_deleter.py  
+# clear_databases.py
+# main.py
+
+# Test files
+test_*.py
+*_test.py
+debug_*.py
+check_db.py
+delete_document.py
+
+# Test output files
 test_output.txt
 test_output_*.txt
-0412-1-2023-ЭОМ -Электроснабжение,электроосвещение и силовое электрооборудование.pdf
+test_chunks_*.txt
+pages_test.txt
+chunks_test*.txt
+chunks_verification*.txt
+ocr_debug_results.txt
 
+# Temporary scripts
+google_drive_listener.py
+update_database.py
+verify_*.py
+index_to_opensearch.py
+view_chunks.py
+
+# Documentation (temporary/local)
 implementation_plan.md
+APP_ANALYSIS.md
+CPU_OPTIMIZATION.md
+DEPENDENCY_ANALYSIS.md
+GARBAGE_DETECTION_TEST_RESULTS.md
+HOW_IT_WORKS.md
+INGESTION_ANALYSIS.md
+LOGGING_GUIDE.md
+OCR_README.md
+OPENSEARCH_SETUP.md
 
-# Temporary test files and scripts
-test_chunking_simple.py
-test_chunking_two_docs.py
-test_chunks_simple.txt
-test_garbage_detection.py
-test_paddle_minimal.py
-chunks_verification.txt
-chunks_verification_new.txt
-verify_ingestion.py
+# Test PDFs
+*.pdf
+!docs/**/*.pdf
+
+# OCR testing directory (local experiments)
+ocr_tests/
+ocr_results/
+results/
+
+# Images
+*.png
+*.jpg
+*.jpeg
+!docs/**/*.png
+!docs/**/*.jpg
+
+# Temporary files
+draft.txt
+data.txt
+data2.txt
+image.png

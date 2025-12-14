@@ -41,8 +41,8 @@ class DocumentProcessorService:
             parsed_pages=parsed_pages,
             document_id=document_id,
             document_title=document_title,
-            chunk_size=500, # Configurable
-            overlap=100
+            chunk_size=1000, # Configurable
+            overlap=150
         )
 
         logger.info(f"Created {len(chunks_data)} chunks for {file_name}")

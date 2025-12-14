@@ -117,10 +117,15 @@ async def process_new_documents():
 
             chunk_objects_to_process = []
             for chunk_data in chunks_data:
+                logger.info(f"--- Chunk (Page {chunk_data['page_number']}) Content ---\n{chunk_data['content']}\n-----------------------------")
                 new_document_chunk = DocumentChunk(
                     document_id=document_id,
+                    document_title=file_name,  # Add document title
                     content=chunk_data['content'],
                     page_number=chunk_data['page_number'],
+                    chunk_index=chunk_data.get('chunk_index', 0),  # Add chunk index
+                    content_type=chunk_data.get('content_type', 'text'),  # Add content type
+                    sheet_name=chunk_data.get('sheet_name'),  # Add sheet name (nullable)
                     qdrant_id=chunk_data['qdrant_id'],
                 )
                 session.add(new_document_chunk)

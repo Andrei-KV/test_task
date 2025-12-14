@@ -20,12 +20,19 @@ class Document(Base):
     load_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
+import uuid
+
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
-    chunk_id: Mapped[int] = mapped_column(primary_key=True)
+    chunk_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.document_id"))
+    document_title: Mapped[str] = mapped_column(String(255))  # Название документа
     page_number: Mapped[int] = mapped_column(Integer, nullable=True)
-    content: Mapped[str] = mapped_column(Text)
-    qdrant_id: Mapped[str] = mapped_column(String(255))
+    chunk_index: Mapped[int] = mapped_column(Integer)  # Глобальный индекс чанка в документе
+    content: Mapped[str] = mapped_column(Text)  # Чистый текст без метаданных
+    content_type: Mapped[str] = mapped_column(String(50), default='text')  # 'text', 'ocr_text', 'table', 'image'
+    sheet_name: Mapped[str] = mapped_column(String(255), nullable=True)  # Для Excel файлов
+    qdrant_id: Mapped[str] = mapped_column(String(255), unique=True)  # ID для векторной БД
     document: Mapped["Document"] = relationship(back_populates="chunks")
+

@@ -91,7 +91,8 @@ class OpenSearchClientWrapper:
             http_auth=None,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
-            ssl_show_warn=False
+            ssl_show_warn=False,
+            timeout=60  # Увеличен таймаут до 60 секунд для медленных операций
         )
         self.__index_name = index_name
 
@@ -134,9 +135,11 @@ class OpenSearchClientWrapper:
                                 "analyzer": "russian_analyzer"
                             },
                             "document_id": {"type": "integer"},
-                            "chunk_id": {"type": "integer"},
+                            "document_title": {"type": "keyword"},
+                            "chunk_id": {"type": "keyword"},
+                            "chunk_index": {"type": "integer"},
                             "page_number": {"type": "integer"},
-                            "type": {"type": "keyword"},
+                            "content_type": {"type": "keyword"},
                             "sheet_name": {"type": "keyword"},
                             "qdrant_id": {"type": "keyword"}
                         }
@@ -163,6 +166,9 @@ class OpenSearchClientWrapper:
             logger.info(f"✅ {success} documents successfully indexed to OpenSearch (Index: {self.__index_name}).")
             if failed:
                 logger.warning(f"⚠️ Failed to index {len(failed)} documents.")
+                # Log details of first few failures
+                for idx, item in enumerate(failed[:3]):
+                    logger.error(f"Failed item {idx+1}: {item}")
         except Exception as e:
             logger.error(f"❌ Error indexing to OpenSearch: {e}")
 
@@ -185,8 +191,12 @@ class DataMapper:
                     "embedding": vector,
                     "content": chunk_obj.content,
                     "document_id": chunk_obj.document_id,
+                    "document_title": chunk_obj.document_title,
                     "chunk_id": chunk_obj.chunk_id,
+                    "chunk_index": chunk_obj.chunk_index,
                     "page_number": chunk_obj.page_number,
+                    "content_type": chunk_obj.content_type,
+                    "sheet_name": chunk_obj.sheet_name,
                     "qdrant_id": chunk_obj.qdrant_id
                 }
             }

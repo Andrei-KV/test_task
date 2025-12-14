@@ -13,12 +13,17 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
 
-    async def send_personal_message(self, text: str, websocket: WebSocket, web_link: Optional[str] = None,  title: Optional[str] = None, page_numbers: list[int] = None, is_loading: bool = False):
+    async def send_personal_message(self, text: str, websocket: WebSocket, 
+                                  web_link: Optional[str] = None,  
+                                  title: Optional[str] = None, 
+                                  page_numbers: list[int] = None, 
+                                  documents: list[dict] = None,
+                                  is_loading: bool = False):
         """
         Отправляет персональное сообщение.
-        Если web_link предоставлен, отправляет JSON.
-        Если is_loading=True, отправляет специальное сообщение-индикатор загрузки.
-        В противном случае, отправляет обычный текст.
+        Поддерживает отправку списка документов.
+        Для совместимости: если передан documents, но нет web_link, 
+        использует первый документ для создания основной кнопки.
         """
         if is_loading:
             # Отправляем JSON с флагом loading
@@ -27,16 +32,33 @@ class ConnectionManager:
                 "is_loading": True
             }
             await websocket.send_json(payload)
-        elif web_link:
-            payload = {
-                "text": text,
-                "web_link": web_link,
-                'title': title
-            }
-            if page_numbers:
-                payload["page_numbers"] = page_numbers
+            return
+
+        # Формируем payload для обычного сообщения
+        payload = {"text": text}
+
+        # Логика обратной совместимости для кнопок (ОТКЛЮЧЕНА, так как создает дубликаты на фронте)
+        # if not web_link and documents and len(documents) > 0:
+        #     web_link = documents[0].get('web_link')
+        #     title = documents[0].get('title')
+            # Можно также собрать страницы из первого документа, если нужно
+            # page_numbers = list(documents[0].get('pages', []))
+
+        if web_link:
+            payload["web_link"] = web_link
+            payload["title"] = title
+        
+        if page_numbers:
+            payload["page_numbers"] = page_numbers
+            
+        if documents:
+            payload["documents"] = documents
+
+        # Если есть структурированные данные (ссылка или документы), отправляем JSON
+        if web_link or documents:
             await websocket.send_json(payload)
         else:
+            # Иначе отправляем просто текст (как раньше)
             await websocket.send_text(text)
 
 

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>RAG_BOT_DEMO</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -8,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div id="chat-container">
         <div id="header">
@@ -15,125 +17,189 @@
             <h2>DEMO AI</h2>
         </div>
         <ul id='messages'>
-            </ul>
+        </ul>
         <form id="form" onsubmit="sendMessage(event)">
-            <input type="text" id="messageText" autocomplete="off" placeholder="Введите запрос" maxlength="500"/>
+            <input type="text" id="messageText" autocomplete="off" placeholder="Введите запрос" maxlength="500" />
             <div id="char-counter">0/500</div>
             <button>→</button>
         </form>
     </div>
     <script>
-        var client_id = Date.now();
-        // Dynamically construct the WebSocket URL
+        // Persistent Client ID for history restoration
+        var client_id = localStorage.getItem('client_id');
+        if (!client_id) {
+            client_id = Date.now();
+            localStorage.setItem('client_id', client_id);
+        }
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        const wsUrl = `${protocol}//${host}/api/v1/ws/${client_id}`;
-        var ws = new WebSocket(wsUrl);
+        let ws;
+        let loadingMessage = null;
 
-        ws.onopen = function(event) {
-            console.log("WebSocket connection established successfully.");
-            var messages = document.getElementById('messages');
-            var message = document.createElement('li');
-            message.className = 'message bot-message';
-            var content = document.createElement('div');
-            content.className = 'message-content';
-            content.innerHTML = "Здравствуйте, я AI-ассистент. Спрашивайте, я отвечу на Ваши вопросы! 🚀";
-            message.appendChild(content);
-            messages.appendChild(message);
-        };
-        let loadingMessage = null; // Track the loading message element
-        
-        ws.onmessage = function(event) {
-            var messages = document.getElementById('messages');
-            
-            try {
-                // Пытаемся распарсить JSON
-                const data = JSON.parse(event.data);
-                
-                // Если это индикатор загрузки
-                if (data.is_loading) {
-                    // Удаляем предыдущий индикатор, если он есть
+        function connect() {
+            const wsUrl = `${protocol}//${host}/api/v1/ws/${client_id}`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function (event) {
+                console.log("WebSocket connection established successfully.");
+                var statusIndicator = document.getElementById('connection-status');
+                if (statusIndicator) statusIndicator.remove();
+
+                // Clear messages only on fresh load if needed, but here we expect history from server
+                // If we reconnect, server sends full history again? 
+                // Currently backend sends history on connect. Ideally we should detect if we already have it.
+                // But for simplicity, we let it append (or user can refresh).
+                // Actually server sends history on EVERY connect. So if we reconnect, we get duplicates.
+                // FIX: Verify duplicates or clear list? simpler to clear list for now on reconnect?
+                // No, better to clear list on reconnect to avoid duplicates.
+                document.getElementById('messages').innerHTML = '';
+
+                // Add welcome message
+                var messages = document.getElementById('messages');
+                var message = document.createElement('li');
+                message.className = 'message bot-message';
+                var content = document.createElement('div');
+                content.className = 'message-content';
+                content.innerHTML = "Здравствуйте, я AI-ассистент. Спрашивайте, я отвечу на Ваши вопросы! 🚀";
+                message.appendChild(content);
+                messages.appendChild(message);
+            };
+
+            ws.onclose = function (event) {
+                console.log('Socket is closed. Reconnect will be attempted in 3 seconds.', event.reason);
+
+                var messages = document.getElementById('messages');
+                if (!document.getElementById('connection-status')) {
+                    var status = document.createElement('li');
+                    status.id = 'connection-status';
+                    status.className = 'message system-message';
+                    status.style.textAlign = 'center';
+                    status.style.color = 'gray';
+                    status.innerText = 'Соединение потеряно. Переподключение...';
+                    messages.appendChild(status);
+                    messages.scrollTop = messages.scrollHeight;
+                }
+
+                setTimeout(function () {
+                    connect();
+                }, 3000);
+            };
+
+            ws.onmessage = function (event) {
+                var messages = document.getElementById('messages');
+
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.is_loading) {
+                        if (loadingMessage) loadingMessage.remove();
+
+                        loadingMessage = document.createElement('li');
+                        loadingMessage.className = 'message bot-message loading-message';
+                        var content = document.createElement('div');
+                        content.className = 'message-content';
+                        content.innerHTML = data.text;
+                        loadingMessage.appendChild(content);
+                        messages.appendChild(loadingMessage);
+                        messages.scrollTop = messages.scrollHeight;
+                        return;
+                    }
+
                     if (loadingMessage) {
                         loadingMessage.remove();
+                        loadingMessage = null;
                     }
-                    
-                    // Создаем новый индикатор загрузки
-                    loadingMessage = document.createElement('li');
-                    loadingMessage.className = 'message bot-message loading-message';
+
+                    var message = document.createElement('li');
+                    message.className = 'message bot-message';
                     var content = document.createElement('div');
                     content.className = 'message-content';
-                    content.innerHTML = data.text;
-                    loadingMessage.appendChild(content);
-                    messages.appendChild(loadingMessage);
+
+                    if (data.text) {
+                        content.innerHTML = marked.parse(data.text);
+                    }
+                    if (data.web_link && data.title) {
+                        var linkButton = document.createElement('a');
+                        linkButton.href = data.web_link;
+                        linkButton.className = 'source-button';
+                        linkButton.target = '_blank';
+                        var buttonText = document.createElement('span');
+                        buttonText.textContent = data.title;
+                        linkButton.appendChild(buttonText);
+                        linkButton.title = data.title;
+
+                        var sourceContainer = document.createElement('div');
+                        sourceContainer.className = 'source-container';
+                        sourceContainer.appendChild(linkButton);
+                        content.appendChild(sourceContainer);
+                    }
+
+                    // Если пришли documents (список), отобразим кнопки (с дедупликацией)
+                    if (data.documents && data.documents.length > 0) {
+                        var docsContainer = document.createElement('div');
+                        docsContainer.className = 'documents-container';
+                        docsContainer.style.marginTop = '10px';
+
+                        var seenLinks = new Set();
+
+                        data.documents.forEach(function (doc) {
+                            // Уникальный ключ: ссылка ИЛИ название
+                            var key = doc.title;
+                            if (seenLinks.has(key)) return;
+                            seenLinks.add(key);
+
+                            var linkButton = document.createElement('a');
+                            linkButton.href = doc.web_link;
+                            linkButton.className = 'source-button';
+                            linkButton.style.display = 'block';
+                            linkButton.style.marginBottom = '5px';
+                            linkButton.target = '_blank';
+                            linkButton.textContent = doc.title;
+                            docsContainer.appendChild(linkButton);
+                        });
+                        content.appendChild(docsContainer);
+                    }
+
+                    message.appendChild(content);
+                    messages.appendChild(message);
                     messages.scrollTop = messages.scrollHeight;
-                    return; // Выходим, не обрабатываем дальше
-                }
-                
-                // Если это обычное сообщение, удаляем индикатор загрузки
-                if (loadingMessage) {
-                    loadingMessage.remove();
-                    loadingMessage = null;
-                }
-                
-                // Создаем обычное сообщение бота
-                var message = document.createElement('li');
-                message.className = 'message bot-message';
-                var content = document.createElement('div');
-                content.className = 'message-content';
-                
-                if (data.text) {
-                    // Если есть текст, обрабатываем его как Markdown
-                    content.innerHTML = marked.parse(data.text);
-                }
-                 // Проверяем наличие web_link и добавляем кнопку
-                 if (data.web_link && data.title) {
-                    var linkButton = document.createElement('a');
-                    linkButton.href = data.web_link;
-                    linkButton.className = 'source-button';
-                    linkButton.target = '_blank'; // Открывать в новой вкладке
-                    
-                    var buttonText = document.createElement('span');
-                    buttonText.textContent = data.title;
-                    linkButton.appendChild(buttonText);
-                    
-                    linkButton.title = data.title; // Для всплывающей подсказки
+                } catch (e) {
+                    // Plain text handling (History or Simple text)
+                    if (loadingMessage) {
+                        loadingMessage.remove();
+                        loadingMessage = null;
+                    }
 
-                    // Create a container for the button and page numbers
-                    var sourceContainer = document.createElement('div');
-                    sourceContainer.className = 'source-container';
+                    var rawText = event.data;
+                    var cssClass = 'bot-message';
 
-                    sourceContainer.appendChild(linkButton);
+                    // Detect history format "role: content"
+                    // Use regex for robust prefix detection
+                    if (/^user:\s*/i.test(rawText)) {
+                        cssClass = 'user-message';
+                        rawText = rawText.replace(/^user:\s*/i, '');
+                    } else if (/^bot:\s*/i.test(rawText)) {
+                        cssClass = 'bot-message';
+                        rawText = rawText.replace(/^bot:\s*/i, '');
+                    } else if (/^system:\s*/i.test(rawText)) {
+                        return; // Ignore system messages
+                    }
 
-                    // Если есть page_numbers, отображаем их
-                    // if (data.page_numbers.length > 0) {
-                    //     var pagesSpan = document.createElement('span');
-                    //     pagesSpan.className = 'page-numbers';
-                    //     pagesSpan.textContent = `Страницы: ${data.page_numbers}`;
-                    //     sourceContainer.appendChild(pagesSpan);
-                    // }
-                    content.appendChild(sourceContainer);
+                    var message = document.createElement('li');
+                    message.className = 'message ' + cssClass;
+                    var content = document.createElement('div');
+                    content.className = 'message-content';
+                    // Use marked for history too
+                    content.innerHTML = typeof marked !== 'undefined' ? marked.parse(rawText) : rawText;
+                    message.appendChild(content);
+                    messages.appendChild(message);
+                    messages.scrollTop = messages.scrollHeight;
                 }
-                
-                message.appendChild(content);
-                messages.appendChild(message);
-                messages.scrollTop = messages.scrollHeight; // Auto-scroll
-            } catch (e)  {
-                // Если не JSON, удаляем индикатор загрузки и вставляем как обычный текст
-                if (loadingMessage) {
-                    loadingMessage.remove();
-                    loadingMessage = null;
-                }
-                
-                var message = document.createElement('li');
-                message.className = 'message bot-message';
-                var content = document.createElement('div');
-                content.className = 'message-content';
-                content.innerHTML = event.data;
-                message.appendChild(content);
-                messages.appendChild(message);
-                messages.scrollTop = messages.scrollHeight; // Auto-scroll
-            }
-        };
+            };
+        }
+
+        connect();
 
         function sendMessage(event) {
             event.preventDefault();
@@ -150,7 +216,7 @@
             content.innerHTML = input.value;
             message.appendChild(content);
             messages.appendChild(message);
-            
+
             ws.send(input.value);
             input.value = '';
             updateCharCounter();
@@ -169,4 +235,5 @@
         updateCharCounter();
     </script>
 </body>
+
 </html>
