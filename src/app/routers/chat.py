@@ -20,7 +20,13 @@ async def websocket_endpoint(
     # Send history to user on connect
     history = await context_manager.get_full_history(client_id)
     for message in history:
-        await manager.send_personal_message(text=f"{message['role']}: {message['content']}", websocket=websocket)
+        # Pass document metadata if available to restore links
+        docs = message.get("documents")
+        await manager.send_personal_message(
+            text=f"{message['role']}: {message['content']}",
+            websocket=websocket,
+            documents=docs
+        )
 
 
     try:
@@ -56,14 +62,17 @@ async def websocket_endpoint(
                     context_query = data
             else:
                 # Default context window for new questions
-                context_window = await context_manager.get_context_window(client_id)
-                context_query = " ".join([msg["content"] for msg in context_window])
+                # context_window = await context_manager.get_context_window(client_id)
+                # context_query = " ".join([msg["content"] for msg in context_window])
+
+                context_query = data
             
             logger.info(f'Context query: {context_query}')
-            answer, web_link, score, title, page_numbers = await rag_service.aquery(context_query)
-            logger.info(f'answer: {answer} \nweb_link: {web_link} \nscore: {score}')
+            answer, documents_info, score = await rag_service.aquery(context_query)
+            
+            logger.info(f'answer: {answer} \ndocuments: {len(documents_info)} \nscore: {score}')
 
-            if score < 0.74:
+            if score < 7.4:
                 clarification_count = await context_manager.get_clarification_count(client_id)
                 if clarification_count < 1:
                     await context_manager.increment_clarification_count(client_id)
@@ -71,19 +80,25 @@ async def websocket_endpoint(
                     await context_manager.add_message(client_id, "bot", clarification_question)
                     await manager.send_personal_message(text=clarification_question, websocket=websocket)
                 else:
-                    await context_manager.reset_context(client_id)
-                    answer, web_link, score, title, page_numbers = await rag_service.aquery(data, low_precision=True)
+                    # await context_manager.reset_context(client_id)
+                    answer, documents_info, score = await rag_service.aquery(context_query, low_precision=True)
+                    
                     warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
                     final_answer = f"{warning}\n\n{answer}"
-                    await context_manager.add_message(client_id, "bot", final_answer)
-                    await manager.send_personal_message(text=final_answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
+                    # 6. Save context
+                    await context_manager.add_message(client_id, "user", data)
+                    await context_manager.add_message(client_id, "bot", final_answer, documents=documents_info)
+                    await manager.send_personal_message(text=final_answer, websocket=websocket, documents=documents_info)
                     #  Reset context after providing a low-precision answer
-                    await context_manager.reset_context(client_id)
+                    # await context_manager.reset_context(client_id)
             else:
-                await context_manager.add_message(client_id, "bot", answer)
-                await manager.send_personal_message(text=answer, websocket=websocket, web_link=web_link, title=title, page_numbers=page_numbers)
+                final_answer = answer
+                # 6. Save context
+                await context_manager.add_message(client_id, "user", data)
+                await context_manager.add_message(client_id, "bot", final_answer, documents=documents_info)
+                await manager.send_personal_message(text=final_answer, websocket=websocket, documents=documents_info)
                 # Reset context after a successful answer
-                await context_manager.reset_context(client_id)
+                # await context_manager.reset_context(client_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

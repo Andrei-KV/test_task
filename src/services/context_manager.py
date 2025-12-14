@@ -22,11 +22,14 @@ class ContextManagerService:
         history = await self._redis.get_history(session_id)
         return history[-window_size:]
 
-    async def add_message(self, session_id: str, role: str, content: str):
+    async def add_message(self, session_id: str, role: str, content: str, documents: list = None):
         """
         Adds a new message to the conversation history.
         """
         message = {"role": role, "content": content}
+        if documents:
+            message["documents"] = documents
+            
         await self._redis.add_message_to_history(session_id, message)
 
     async def get_clarification_count(self, session_id: str) -> int:

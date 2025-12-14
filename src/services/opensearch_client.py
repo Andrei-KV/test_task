@@ -10,6 +10,11 @@ from src.config import (
     OPENSEARCH_INDEX,
     OPENSEARCH_USE_SSL,
     OPENSEARCH_VERIFY_CERTS,
+    SEARCH_LIMIT_FINAL_K,
+    SEARCH_KNN_SIZE,
+    SEARCH_BM25_SIZE,
+    SEARCH_RERANK_LIMIT,
+    SEARCH_RRF_K,
     EMBEDDING_DIMENSION
 )
 from src.app.logging_config import get_logger
@@ -19,8 +24,8 @@ logger = get_logger(__name__)
 
 class QueryOpenSearchClient:
     """
-    OpenSearch client for hybrid search combining vector (knn) and full-text (match) search.
-    Uses AsyncOpenSearch for async operations and CrossEncoder for reranking.
+    OpenSearch client for hybrid search with RRF (Reciprocal Rank Fusion).
+    Combines vector (knn), full-text (BM25), and CrossEncoder reranking.
     """
     
     def __init__(self, host: str, port: int, index_name: str, use_ssl: bool = False, verify_certs: bool = False):
@@ -29,10 +34,11 @@ class QueryOpenSearchClient:
         # Initialize AsyncOpenSearch client
         self.__client = AsyncOpenSearch(
             hosts=[{'host': host, 'port': port}],
-            http_auth=None,  # No auth for development (DISABLE_SECURITY_PLUGIN=true)
+            http_auth=None,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
-            ssl_show_warn=False
+            ssl_show_warn=False,
+            timeout=60
         )
         
         # Initialize CrossEncoder for reranking
@@ -42,9 +48,50 @@ class QueryOpenSearchClient:
         logger.info(f"OpenSearch client initialized: {host}:{port}, index: {index_name}")
     
     @staticmethod
-    def _sigmoid(x):
-        """Sigmoid function for score normalization."""
-        return 1 / (1 + np.exp(-x))
+    def _reciprocal_rank_fusion(
+        knn_results: List[Dict], 
+        bm25_results: List[Dict], 
+        k: int = 60
+    ) -> List[Dict]:
+        """
+        Implements Reciprocal Rank Fusion (RRF) algorithm.
+        
+        RRF Score = sum(1 / (k + rank_i)) for each ranking list
+        
+        Args:
+            knn_results: Results from vector search
+            bm25_results: Results from BM25 search
+            k: Constant (typically 60)
+        
+        Returns:
+            Merged and re-ranked results
+        """
+        rrf_scores = {}
+        
+        # Process kNN results
+        for rank, result in enumerate(knn_results, start=1):
+            doc_id = result['_id']
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + (1 / (k + rank))
+        
+        # Process BM25 results
+        for rank, result in enumerate(bm25_results, start=1):
+            doc_id = result['_id']
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + (1 / (k + rank))
+        
+        # Create unified result list
+        all_docs = {}
+        for result in knn_results + bm25_results:
+            doc_id = result['_id']
+            if doc_id not in all_docs:
+                all_docs[doc_id] = result
+        
+        # Sort by RRF score
+        ranked_results = [
+            {**all_docs[doc_id], 'rrf_score': score}
+            for doc_id, score in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        return ranked_results
     
     async def create_index(self):
         """
@@ -90,13 +137,19 @@ class QueryOpenSearchClient:
                     "document_id": {
                         "type": "integer"
                     },
+                    "document_title": {
+                        "type": "keyword"
+                    },
                     "chunk_id": {
+                        "type": "keyword"
+                    },
+                    "chunk_index": {
                         "type": "integer"
                     },
                     "page_number": {
                         "type": "integer"
                     },
-                    "type": {
+                    "content_type": {
                         "type": "keyword"
                     },
                     "sheet_name": {
@@ -124,70 +177,114 @@ class QueryOpenSearchClient:
         self, 
         query_vector: List[float], 
         user_query: str, 
-        limit_k: int = 25
-    ) -> tuple[List[int], Optional[int], float]:
+        limit_final_k: int = SEARCH_LIMIT_FINAL_K, 
+        knn_size: int = SEARCH_KNN_SIZE,       
+        bm25_size: int = SEARCH_BM25_SIZE,      
+        rerank_limit: int = SEARCH_RERANK_LIMIT,
+        use_rrf: bool = True
+    ) -> Dict[str, Any]:
         """
-        Performs hybrid search combining knn (vector) and match (full-text) queries.
+        Performs hybrid search with RRF and CrossEncoder reranking.
+        Supports multi-document context retrieval.
         
         Args:
             query_vector: Embedding vector for the query
             user_query: Text query for full-text search
             limit_k: Number of results to return
+            use_rrf: Whether to use RRF (True) or native hybrid query (False)
             
         Returns:
-            Tuple of (chunk_ids, document_id, max_score)
+            Dict with:
+                - chunks: List of top chunks with metadata
+                - document_ids: List of unique document IDs
+                - max_score: Highest relevance score
         """
-        logger.info("Performing hybrid search in OpenSearch...")
-        
-        # Hybrid search query combining knn and match
-        search_body = {
-            "size": limit_k,
-            "query": {
-                "hybrid": {
-                    "queries": [
-                        {
-                            "knn": {
-                                "embedding": {
-                                    "vector": query_vector,
-                                    "k": limit_k
-                                }
-                            }
-                        },
-                        {
-                            "match": {
-                                "content": {
-                                    "query": user_query,
-                                    "boost": 1.0
-                                }
+        logger.info(f"Performing hybrid search (RRF={use_rrf}) in OpenSearch...")
+        SOURCE_FIELD = ["content", "document_id", "document_title", "chunk_id", "chunk_index", "page_number", "content_type", "sheet_name"]
+        try:
+            if use_rrf:
+                # Separate kNN and BM25 queries for manual RRF
+                knn_body = {
+                    "size": knn_size,
+                    "query": {
+                        "knn": {
+                            "embedding": {
+                                "vector": query_vector,
+                                "k": knn_size
                             }
                         }
-                    ]
+                    },
+                    "_source": SOURCE_FIELD }
+                
+                bm25_body = {
+                    "size": bm25_size,
+                    "query": {
+                        "match": {
+                            "content": {
+                                "query": user_query,
+                                "operator": "or"
+                            }
+                        }
+                    },
+                    "_source": SOURCE_FIELD
                 }
-            },
-            "_source": ["content", "document_id", "chunk_id", "page_number", "type", "sheet_name"]
-        }
-        
-        try:
-            response = await self.__client.search(
-                index=self.__index_name,
-                body=search_body
-            )
-            
-            hits = response['hits']['hits']
-            logger.info(f"Hybrid search found {len(hits)} candidates.")
+                
+                # Execute both searches in parallel
+                knn_response, bm25_response = await asyncio.gather(
+                    self.__client.search(index=self.__index_name, body=knn_body),
+                    self.__client.search(index=self.__index_name, body=bm25_body)
+                )
+                
+                knn_hits = knn_response['hits']['hits']
+                bm25_hits = bm25_response['hits']['hits']
+                
+                logger.info(f"kNN: {len(knn_hits)} results, BM25: {len(bm25_hits)} results")
+                
+                # Apply RRF
+                merged_results = self._reciprocal_rank_fusion(knn_hits, bm25_hits, k=SEARCH_RRF_K)
+                hits = merged_results[:rerank_limit]
+
+            else:
+                # Use native OpenSearch hybrid query
+                search_body = {
+                    "size": limit_final_k,
+                    "query": {
+                        "hybrid": {
+                            "queries": [
+                                {
+                                    "knn": {
+                                        "embedding": {
+                                            "vector": query_vector,
+                                            "k": knn_size
+                                        }
+                                    }
+                                },
+                                {
+                                    "match": {
+                                        "content": {
+                                            "query": user_query,
+                                            "boost": 1.0
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "_source": SOURCE_FIELD}
+                
+                response = await self.__client.search(index=self.__index_name, body=search_body)
+                hits = response['hits']['hits']
             
             if not hits:
                 logger.warning("No candidates found from hybrid search.")
-                return [], None, 0
-            
-            max_score = hits[0]['_score'] if hits else 0
+                return {"chunks": [], "document_ids": [], "max_score": 0}
             
             # Extract candidates
             candidates = []
             for hit in hits:
                 candidate = {
                     'id': hit['_id'],
-                    'score': hit['_score'],
+                    'score': hit.get('rrf_score', hit.get('_score', 0)),
                     'payload': hit['_source']
                 }
                 candidates.append(candidate)
@@ -199,63 +296,59 @@ class QueryOpenSearchClient:
             ]
             
             if not valid_candidates:
-                logger.warning("No valid candidates left after filtering for content.")
-                return [], None, 0
+                logger.warning("No valid candidates after filtering.")
+                return {"chunks": [], "document_ids": [], "max_score": 0}
             
             # Rerank with CrossEncoder
-            logger.info(f"Reranking {len(valid_candidates)} candidates...")
+            logger.info(f"Reranking {len(valid_candidates)} candidates with CrossEncoder...")
             rerank_pairs = [[user_query, c['payload']['content']] for c in valid_candidates]
             reranked_scores = await asyncio.to_thread(self.__cross_encoder.predict, rerank_pairs)
             
-            # Normalize scores and update candidates
-            normalized_scores = self._sigmoid(reranked_scores)
-            for candidate, score in zip(valid_candidates, normalized_scores):
-                candidate['score'] = score
+            # Update scores (CrossEncoder returns logits, no need for sigmoid)
+            for candidate, score in zip(valid_candidates, reranked_scores):
+                candidate['rerank_score'] = float(score)
             
-            # Sort by reranked score
-            valid_candidates.sort(key=lambda x: x['score'], reverse=True)
+            # Sort by CrossEncoder score
+            valid_candidates.sort(key=lambda x: x['rerank_score'], reverse=True)
             
-            logger.debug(f"Top 8 candidates after reranking:")
-            for i, candidate in enumerate(valid_candidates[:8]):
-                logger.debug(
-                    f"{i+1}. ID: {candidate['id']}, Score: {candidate['score']:.4f}, "
-                    f"DocID: {candidate['payload'].get('document_id')}"
+            # Select top chunks (multi-document support)
+            top_chunks = valid_candidates[:limit_final_k]
+            
+            logger.info(f"Top {min(limit_final_k, len(top_chunks))} chunks after reranking:")
+            for i, candidate in enumerate(top_chunks[:limit_final_k]):
+                logger.info(
+                    f"{i+1}. Score: {candidate['rerank_score']:.4f}, "
+                    f"Doc: {candidate['payload'].get('document_title', 'N/A')}, "
+                    f"Page: {candidate['payload'].get('page_number', 'N/A')}"
                 )
             
-            # Get most relevant document_id
-            first_candidate = valid_candidates[0]
-            if not first_candidate['payload'] or 'document_id' not in first_candidate['payload']:
-                logger.error("The most relevant candidate is missing 'document_id'.")
-                return [], None, 0
+            # Extract unique document IDs
+            document_ids = list(set(
+                c['payload']['document_id'] 
+                for c in top_chunks 
+                if c['payload'] and 'document_id' in c['payload']
+            ))
             
-            target_document_id = first_candidate['payload']['document_id']
-            logger.info(f"Most relevant document_id: {target_document_id}")
+            logger.info(f"Context spans {len(document_ids)} document(s): {document_ids}")
             
-            # Filter candidates by target document
-            filtered_candidates = [
-                c for c in valid_candidates
-                if c['payload'] and c['payload'].get('document_id') == target_document_id
-            ]
+            # Prepare result
+            result_chunks = []
+            for candidate in top_chunks:
+                result_chunks.append({
+                    'chunk_id': candidate['payload'].get('chunk_id'),
+                    'document_id': candidate['payload'].get('document_id'),
+                    'document_title': candidate['payload'].get('document_title'),
+                    'content': candidate['payload'].get('content'),
+                    'page_number': candidate['payload'].get('page_number'),
+                    'content_type': candidate['payload'].get('content_type'),
+                    'score': candidate['rerank_score']
+                })
             
-            top_relevant_chunks = filtered_candidates[:8]
-            
-            if not top_relevant_chunks:
-                logger.warning(f"No relevant chunks found for document_id: {target_document_id}")
-                return [], None, 0
-            
-            logger.info(f"Selected {len(top_relevant_chunks)} top relevant chunks from target document.")
-            
-            # Collect chunk_ids
-            target_chunk_ids = {
-                c['payload']['chunk_id'] for c in top_relevant_chunks
-                if c['payload'] and 'chunk_id' in c['payload']
+            return {
+                "chunks": result_chunks,
+                "document_ids": document_ids,
+                "max_score": top_chunks[0]['rerank_score'] if top_chunks else 0
             }
-            
-            if not target_chunk_ids:
-                logger.error("Selected chunks are missing 'chunk_id'.")
-                return [], None, 0
-            
-            return sorted(list(target_chunk_ids)), target_document_id, first_candidate['score']
             
         except Exception as e:
             logger.error(f"Error during hybrid search: {e}")

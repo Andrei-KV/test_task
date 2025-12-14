@@ -30,11 +30,11 @@ def list_files_in_folder(service, folder_id: str):
         response = service.files().list(
             q=query,
             fields='files(id, name, mimeType)',
-            pageSize=10
+            pageSize=1000  # Increased to get all files
         ).execute()
         files = response.get('files', [])
         if files:
-            logger.info(f"✅ Success! Found {len(files)} files (or more).")
+            logger.info(f"✅ Success! Found {len(files)} files.")
             file_data_list = []
             for f in files:
                 file_data_list.append({

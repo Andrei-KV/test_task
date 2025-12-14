@@ -29,11 +29,11 @@ logger = get_logger(__name__)
 os.environ['OMP_THREAD_LIMIT'] = '1'
 
 # Настройки адаптивного OCR
-ADAPTIVE_OCR_DPI = 250
+ADAPTIVE_OCR_DPI = 300
 ADAPTIVE_SIZE_THRESHOLDS = {
-    'A2': {'max_size': 4500, 'max_dimension': 1700},  # Большие страницы
-    'A3': {'max_size': 3500, 'max_dimension': 1500},  # Средние страницы
-    'A4': {'max_size': 2500, 'max_dimension': 1200},  # Стандартные страницы
+    'A2': {'max_size': 4500, 'max_dimension': 2500, 'dpi': ADAPTIVE_OCR_DPI},  # Большие страницы
+    'A3': {'max_size': 3500, 'max_dimension': 2000, 'dpi': ADAPTIVE_OCR_DPI * 1.4},  # Средние страницы
+    'A4': {'max_size': 2500, 'max_dimension': 1500, 'dpi': ADAPTIVE_OCR_DPI * 1.6},  # Стандартные страницы
 }
 
 class DocumentParser:
@@ -174,8 +174,16 @@ class DocumentParser:
             return False
             
         text_len = len(text)
-        if text_len < 20:
-            return False # Слишком короткий
+        
+        # Check for meaningful content (alphanumeric)
+        alphanumeric_count = len(re.findall(r'[a-zA-Zа-яА-Я0-9]', text))
+        
+        # If very short text has no meaningful characters (only punctuation/symbols), it's garbage
+        if text_len < 50:
+             if alphanumeric_count < 3:
+                 return True
+             # If it has some letters, we trust it for now unless ratio check fails below
+        
             
         # Разрешенные символы:
         # - Кириллица: \u0400-\u04FF (в регексе [а-яА-ЯёЁ])
@@ -231,11 +239,11 @@ class DocumentParser:
 
     def _parse_pdf(self, file_path: str, max_pages: int = None) -> List[Dict[str, Any]]:
         """
-        Парсинг PDF с таймаутом на страницу (30 секунд).
+        Парсинг PDF с таймаутом на страницу (60 секунд).
         Страницы, которые не удалось обработать, логируются в failed_pages.jsonl.
         При 3 подряд таймаутах - остановка обработки документа.
         """
-        MAX_TIMEOUT_PER_PAGE = 30  # 30 секунд на страницу
+        MAX_TIMEOUT_PER_PAGE = 60  #  секунд на страницу
         MAX_CONSECUTIVE_TIMEOUTS = 3  # Максимум 3 подряд таймаута
         
         document_name = os.path.basename(file_path)
@@ -276,7 +284,7 @@ class DocumentParser:
                                     file_path, 
                                     first_page=page_num+1, 
                                     last_page=page_num+1, 
-                                    dpi=ADAPTIVE_OCR_DPI,  # 250 DPI для качественного распознавания таблиц
+                                    dpi=ADAPTIVE_OCR_DPI,  # DPI для качественного распознавания таблиц
                                     fmt='jpeg',
                                     grayscale=True
                                 )

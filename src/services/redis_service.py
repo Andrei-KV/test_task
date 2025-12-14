@@ -43,6 +43,11 @@ class RedisService:
         """
         history = await self.get_history(session_id)
         history.append(message)
+        
+        # Keep only last 50 messages
+        if len(history) > 50:
+            history = history[-50:]
+            
         await self._redis.set(session_id, json.dumps(history), ex=ttl)
 
     async def clear_history(self, session_id: str):
