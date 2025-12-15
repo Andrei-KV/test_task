@@ -47,4 +47,4 @@ COPY delete_document.py .
 COPY clear_databases.py .
 
 # Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150", "--workers", "4"]

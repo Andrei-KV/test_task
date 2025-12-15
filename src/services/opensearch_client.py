@@ -10,6 +10,7 @@ from src.config import (
     OPENSEARCH_INDEX,
     OPENSEARCH_USE_SSL,
     OPENSEARCH_VERIFY_CERTS,
+    OPENSEARCH_PASSWORD,
     SEARCH_LIMIT_FINAL_K,
     SEARCH_KNN_SIZE,
     SEARCH_BM25_SIZE,
@@ -31,10 +32,12 @@ class QueryOpenSearchClient:
     def __init__(self, host: str, port: int, index_name: str, use_ssl: bool = False, verify_certs: bool = False):
         self.__index_name = index_name
         
+        http_auth = ("admin", OPENSEARCH_PASSWORD) if OPENSEARCH_PASSWORD else None
+
         # Initialize AsyncOpenSearch client
         self.__client = AsyncOpenSearch(
             hosts=[{'host': host, 'port': port}],
-            http_auth=None,
+            http_auth=http_auth,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
             ssl_show_warn=False,

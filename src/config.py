@@ -19,6 +19,7 @@ OPENSEARCH_PORT = int(os.getenv("OPENSEARCH_PORT", 9200))
 OPENSEARCH_INDEX = os.getenv("OPENSEARCH_INDEX", "rag_chunks")
 OPENSEARCH_USE_SSL = os.getenv("OPENSEARCH_USE_SSL", "false").lower() == "true"
 OPENSEARCH_VERIFY_CERTS = os.getenv("OPENSEARCH_VERIFY_CERTS", "false").lower() == "true"
+OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD")
 
 
 # Embedding model configuration
@@ -36,6 +37,7 @@ RESERVE_LLM_MODEL = "deepseek-chat"
 # Redis configuration
 REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 
 # Telegram bot configuration
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')

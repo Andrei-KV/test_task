@@ -29,6 +29,8 @@ test_*.py
 debug_*.py
 check_db.py
 delete_document.py
+docker-compose-dev.yml
+docker-compose.override.yml
 
 # Test output files
 test_output.txt
