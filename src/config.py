@@ -51,14 +51,16 @@ LLM_TEMPERATURE_CREATIVE = 0.5 # For low_precision queries
 LLM_TOP_P = 0.75
 
 # Token limits
-LLM_MAX_OUTPUT_TOKENS = 1500  # Default limit (Deepseek)
+# Token limits
+LLM_MAX_OUTPUT_TOKENS = 2000  # Default limit (Deepseek)
 LLM_MAX_OUTPUT_TOKENS_EXTENDED = 3000 # For Gemini or verbose models
+LLM_MAX_INPUT_TOKENS = 4000   # Max context window for LLM input
 
 # =====================================================================
 # RAG Retrieval & OpenSearch Configuration
 # =====================================================================
 # Hybrid Search Parameters
-SEARCH_LIMIT_FINAL_K = 7      # Final number of chunks to return to LLM context (Optimized for speed)
+SEARCH_LIMIT_FINAL_K = 15      # Final number of chunks to return to LLM context (Optimized for speed)
 SEARCH_RERANK_LIMIT = 10      # Number of candidates to rerank
 
 SEARCH_KNN_SIZE = 25          # Number of vector search candidates to fetch

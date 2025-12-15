@@ -86,7 +86,6 @@ async def websocket_endpoint(
                     warning = "Точность ответа может быть низкой. Попробуйте переформулировать вопрос."
                     final_answer = f"{warning}\n\n{answer}"
                     # 6. Save context
-                    await context_manager.add_message(client_id, "user", data)
                     await context_manager.add_message(client_id, "bot", final_answer, documents=documents_info)
                     await manager.send_personal_message(text=final_answer, websocket=websocket, documents=documents_info)
                     #  Reset context after providing a low-precision answer
@@ -94,7 +93,6 @@ async def websocket_endpoint(
             else:
                 final_answer = answer
                 # 6. Save context
-                await context_manager.add_message(client_id, "user", data)
                 await context_manager.add_message(client_id, "bot", final_answer, documents=documents_info)
                 await manager.send_personal_message(text=final_answer, websocket=websocket, documents=documents_info)
                 # Reset context after a successful answer
