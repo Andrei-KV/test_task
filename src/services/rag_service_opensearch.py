@@ -24,6 +24,7 @@ from ..config import (
     OPENSEARCH_INDEX,
     OPENSEARCH_USE_SSL,
     OPENSEARCH_VERIFY_CERTS,
+    LLM_MAX_INPUT_TOKENS,
     LLM_TEMPERATURE_PRECISE,
     LLM_TEMPERATURE_CREATIVE,
     LLM_TOP_P,
@@ -76,72 +77,45 @@ class QueryEmbeddingService:
 class ContextRetriever:
     """Инкапсулирует логику извлечения полного контекста из PostgreSQL."""
 
-    async def retrieve_full_context(
-        self, 
-        search_results: Dict[str, Any], 
-        session: AsyncSession
-    ) -> tuple:
+    async def retrieve_full_context(self, search_results: Dict, session: AsyncSession) -> tuple:
         """
-        Извлекает полный текстовый контекст по результатам поиска.
+        Извлекает и фильтрует контекст по токенам и релевантности (Smart Truncation).
         
-        Args:
-            search_results: Dict с ключами 'chunks', 'document_ids', 'max_score'
-            session: AsyncSession для работы с БД
-            
-        Returns:
-            Tuple: (context, documents_info, max_score)
-            - context: str - объединенный текст всех чанков
-            - documents_info: List[Dict] - информация о каждом документе
-            - max_score: float - максимальный скор релевантности
+        Algorithm:
+        1. Fetch all candidate chunks.
+        2. Sort by Score DESC.
+        3. Accumulate chunks until LLM_MAX_INPUT_TOKENS is reached.
+        4. Group by Document and format.
         """
         logger.info("Retrieving full context from PostgreSQL...")
     
-        chunks = search_results.get('chunks', [])
-        document_ids = search_results.get('document_ids', [])
-        max_score = search_results.get('max_score', 0)
-        
-        if not chunks:
+        chunks_metadata = search_results.get('chunks', [])
+        if not chunks_metadata:
             logger.warning("No chunks found in search results.")
+            return "", [], 0.0
+
+        # 1. Map scores to chunk_ids
+        chunk_scores = {c['chunk_id']: c.get('score', 0) for c in chunks_metadata if c.get('chunk_id')}
+        chunk_ids = list(chunk_scores.keys())
+
+        if not chunk_ids:
             return "", [], 0.0
 
         from sqlalchemy import select
-
-        # Собираем chunk_ids для запроса
-        chunk_ids = [c['chunk_id'] for c in chunks if c.get('chunk_id')]
         
-        if not chunks:
-            logger.warning("No chunks found in search results.")
-            return "", [], 0.0
-
-        # Collect scores per document ID for ranking
-        doc_scores = {}
-        for chunk in chunks:
-            d_id = chunk.get('document_id')
-            score = chunk.get('score', 0)
-            if d_id:
-                # Ensure d_id is int for comparison with DB results
-                try:
-                    d_id = int(d_id)
-                    if score > doc_scores.get(d_id, 0):
-                        doc_scores[d_id] = score
-                except ValueError:
-                    continue
-
-        chunk_ids = [c['chunk_id'] for c in chunks]
-        
-        # Fetch chunk content and metadata from PostgreSQL
+        # 2. Fetch content
         stmt = (
             select(
                 DocumentChunk.content, 
                 DocumentChunk.page_number, 
                 DocumentChunk.chunk_id,
                 DocumentChunk.document_id,
+                DocumentChunk.chunk_index,
                 Document.web_link, 
                 Document.title
             )
             .join(Document)
             .where(DocumentChunk.chunk_id.in_(chunk_ids))
-            .order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
         )
         sql_results = (await session.execute(stmt)).fetchall()
 
@@ -149,69 +123,111 @@ class ContextRetriever:
             logger.warning("No results found in PostgreSQL for the given chunk IDs.")
             return "", [], 0.0
 
-        # Group chunks by document
-        docs_data = {}
-        for result in sql_results:
-            doc_id = result.document_id
-            if doc_id not in docs_data:
-                docs_data[doc_id] = {
-                    'document_id': doc_id,
-                    'title': result.title,
-                    'web_link': result.web_link,
+        # 3. Create rich chunk objects with score
+        rich_chunks = []
+        for res in sql_results:
+            score = chunk_scores.get(res.chunk_id, 0)
+            rich_chunks.append({
+                'content': res.content,
+                'page_number': res.page_number,
+                'chunk_id': res.chunk_id,
+                'chunk_index': res.chunk_index,
+                'document_id': res.document_id,
+                'title': res.title,
+                'web_link': res.web_link,
+                'score': score
+            })
+
+        # 4. Sort by Score DESC (Prioritize best chunks)
+        rich_chunks.sort(key=lambda x: x['score'], reverse=True)
+
+        # 5. Filter by Token Limit
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+        max_tokens = LLM_MAX_INPUT_TOKENS
+        current_tokens = 0
+        accepted_chunks = []
+
+        logger.info(f"Smart Truncation: Selecting chunks to fit {max_tokens} tokens...")
+
+        for chunk in rich_chunks:
+            # Estimate tokens: content + approximate header overhead (~50 tokens)
+            text_len = len(tokenizer.encode(chunk['content'])) + 50 
+            
+            if current_tokens + text_len <= max_tokens:
+                accepted_chunks.append(chunk)
+                current_tokens += text_len
+            else:
+                logger.debug(f"Skipping chunk {chunk['chunk_id']} (Score: {chunk['score']:.4f}) due to token limit.")
+
+        if not accepted_chunks:
+            logger.warning("All chunks were filtered out by token limit!")
+            # Fallback: take at least one chunk
+            accepted_chunks.append(rich_chunks[0])
+
+        final_max_score = max(c['score'] for c in accepted_chunks)
+        
+        logger.info(f"Selected {len(accepted_chunks)}/{len(rich_chunks)} chunks (~{current_tokens} tokens).")
+
+        # 6. Group by Document for Display
+        docs_map = {}
+        for chunk in accepted_chunks:
+            did = chunk['document_id']
+            if did not in docs_map:
+                docs_map[did] = {
+                    'document_id': did,
+                    'title': chunk['title'],
+                    'web_link': chunk['web_link'],
                     'chunks': [],
                     'pages': set(),
-                    'score': doc_scores.get(doc_id, 0)
+                    'max_chunk_score': chunk['score'] 
                 }
+            docs_map[did]['chunks'].append(chunk)
+            if chunk['page_number']:
+                docs_map[did]['pages'].add(chunk['page_number'])
             
-            docs_data[doc_id]['chunks'].append({
-                'content': result.content,
-                'page_number': result.page_number
-            })
-            if result.page_number:
-                docs_data[doc_id]['pages'].add(result.page_number)
-        
-        # Sort documents by score descending (all documents)
-        sorted_docs = sorted(docs_data.values(), key=lambda x: x['score'], reverse=True)
+            # Update max score for the document
+            if chunk['score'] > docs_map[did]['max_chunk_score']:
+                docs_map[did]['max_chunk_score'] = chunk['score']
 
-        # Format context with document headers
+        # Sort documents by their best chunk score
+        sorted_docs = sorted(docs_map.values(), key=lambda x: x['max_chunk_score'], reverse=True)
+
+        # 7. Format context
         context_parts = []
-        documents_info = [] # Rebuild documents_info based on sorted selection
-        
-        for idx, doc_data in enumerate(sorted_docs, 1):
-            # Update title for buttons: "N. Document Name"
-            original_title = doc_data['title']
-            doc_data['title'] = f"{idx}. {original_title}"
-            
-            # Format page ranges
-            pages = sorted(doc_data['pages'])
-            page_ranges = self._format_page_ranges(pages)
-            
-            # Add document header with Index for LLM context
-            # This index is just for structured display in the response
-            doc_header = f"\n### Документ {idx}: {original_title}"
-            if page_ranges:
-                doc_header += f" (стр. {page_ranges})"
-            context_parts.append(doc_header)
-            
-            # Add chunks
-            for chunk in doc_data['chunks']:
-                page_tag = f"[стр. {chunk['page_number']}]" if chunk['page_number'] else ""
-                context_parts.append(f"{page_tag} {chunk['content']}")
-            
-            # Save document info
-            documents_info.append({
-                'document_id': doc_id,
-                'title': doc_data['title'],
-                'web_link': doc_data['web_link'],
+        documents_info = []
+
+        for idx, doc in enumerate(sorted_docs, 1):
+             # Sort chunks within document by chunk_index (Reading Order)
+             doc['chunks'].sort(key=lambda x: (x['chunk_index'] if x['chunk_index'] is not None else 0))
+
+             # Update title for display
+             display_title = f"{idx}. {doc['title']}"
+             
+             page_ranges = self._format_page_ranges(list(doc['pages']))
+             
+             header = f"\n### Документ {idx}: {doc['title']}"
+             if page_ranges:
+                 header += f" (стр. {page_ranges})"
+             
+             context_parts.append(header)
+             
+             for c in doc['chunks']:
+                 ptagd = f"[стр. {c['page_number']}]" if c['page_number'] else ""
+                 context_parts.append(f"{ptagd} {c['content']}")
+
+             documents_info.append({
+                'document_id': doc['document_id'],
+                'title': display_title,
+                'web_link': doc['web_link'],
                 'pages': page_ranges
             })
+
+        full_context = "\n".join(context_parts)
         
-        context = "\n".join(context_parts)
+        logger.debug(f'Full context length: {len(full_context)} chars.')
+        logger.debug(f"=== FULL RAG CONTEXT ===\n{full_context}\n========================")
         
-        logger.info(f"Context retrieved from {len(documents_info)} document(s)")
-        logger.debug(f'Full context retrieved: {context[:500]}...')
-        
-        return context, documents_info, max_score
+        return full_context, documents_info, final_max_score
     
     @staticmethod
     def _format_page_ranges(pages: list[int]) -> str:
@@ -607,14 +623,9 @@ class RAGService:
         # 4. Select system instructions
         final_system_instructions = self.__prompt_manager.get_instructions()
 
-        # 5. Measure and limit context size
+        # 5. Measure context size (Truncation handled in retrieve_full_context)
         tokenizer = tiktoken.get_encoding("cl100k_base")
         tokens = tokenizer.encode(context)
-        if len(tokens) > 3000:
-            context = tokenizer.decode(tokens[:3000])
-            # context += "\n[ОГРАНИЧЕНИЕ ПО ТОКЕНАМ]"
-            logger.warning("Context was truncated to 3000 tokens.")
-            tokens = tokenizer.encode(context)
         
         size_bytes = len(context.encode('utf-8'))
         size_mb = size_bytes / (1024 * 1024)
