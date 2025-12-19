@@ -1,7 +1,7 @@
 from typing import Optional, List
 import json
 from redis.asyncio import Redis
-from ..config import REDIS_HOST, REDIS_PORT
+from ..config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD
 
 class RedisService:
     """
@@ -17,7 +17,12 @@ class RedisService:
         Establishes the Redis connection.
         """
         if not self._redis:
-            self._redis = Redis(host=self._host, port=self._port, decode_responses=True)
+            self._redis = Redis(
+                host=self._host, 
+                port=self._port, 
+                password=REDIS_PASSWORD, 
+                decode_responses=True
+            )
 
     async def disconnect(self):
         """

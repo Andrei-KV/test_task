@@ -8,14 +8,12 @@ services:
     image: postgres:16-alpine # Используем легкий образ
     container_name: legal_rag_postgres
     restart: always
+    env_file:
+      - .env
     environment:
-      # Настройки, соответствующие вашему DB_URI:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: legal_rag_db
-    ports:
-      # Маппинг порта: [хост]:[контейнер]
-      - "7350:5432"
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
     volumes:
       # Сохранение данных на хосте (данные не будут потеряны при перезапуске)
       - postgres_data:/var/lib/postgresql/data
@@ -28,47 +26,77 @@ services:
       retries: 5
 
   # ----------------------------------------------------------------
-  # 3. Redis Service (Кэш и хранилище сессий)
+  # 2. Redis Service (Кэш и хранилище сессий)
   # ----------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: legal_rag_redis
     restart: always
-    ports:
-      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    # ports: # Prod: Closed
+    #   - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - in_net
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
   # ----------------------------------------------------------------
-  # 4. OpenSearch Service (Гибридный поиск)
+  # 3. OpenSearch Service (Гибридный поиск)
   # ----------------------------------------------------------------
   opensearch:
     image: opensearchproject/opensearch:2.11.0
     container_name: opensearch
+    restart: always
     environment:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-      - DISABLE_SECURITY_PLUGIN=true # For development only
-      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin123!"
-    ports:
-      - "9200:9200"
-      - "9600:9600"
+      - DISABLE_SECURITY_PLUGIN=false
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD}
+    # ports: # Prod: Closed
+    #   - "9201:9200"
+    #   - "9601:9600"
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     networks:
       - in_net
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f -k -u admin:$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
+
+  # ----------------------------------------------------------------
+  # 4. WireGuard Service
+  # ----------------------------------------------------------------
+  wireguard:
+    image: qmcgaw/gluetun
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8888:8888/tcp" # HTTP Proxy
+    volumes:
+      - ./wireguard/wg_confs/wg0.conf:/gluetun/wireguard/wg0.conf:ro
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - HTTPPROXY=on # Включаем прокси
+      - DOT=off
+      - DNS_UPDATE_PERIOD=0
+      - WIREGUARD_MTU=1200 # Безопасный MTU
+      - DNS_ADDRESS=127.0.0.11
+      # Разрешаем доступ к локальной сети Docker
+      - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+    networks:
+      - in_net
+    restart: always
 
   # ----------------------------------------------------------------
   # 5. FastAPI App Service (Основное приложение)
@@ -81,23 +109,22 @@ services:
       - "7150:7150"
     env_file:
       - .env
+    environment:
+      - OPENSEARCH_USE_SSL=true # Принудительно включаем SSL для соединения с БД
     networks:
       - in_net
+
     depends_on:
+      wireguard:
+        condition: service_started
       postgres_db:
         condition: service_healthy
       redis:
         condition: service_healthy
       opensearch:
         condition: service_healthy
-    volumes:
-      - ./src:/app/src
-      - ./main.py:/app/main.py
-      - ./process_new_documents_test.py:/app/process_new_documents_test.py
-      - ./delete_document.py:/app/delete_document.py
-      - ./clear_databases.py:/app/clear_databases.py
-      - ./verify_ingestion.py:/app/verify_ingestion.py
-    command: uvicorn main:app --host 0.0.0.0 --port 7150 --reload
+
+    command: uvicorn main:app --host 0.0.0.0 --port 7150 --workers 4
 
 volumes:
   postgres_data:

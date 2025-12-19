@@ -6,6 +6,7 @@ from src.config import (
     OPENSEARCH_INDEX, 
     OPENSEARCH_USE_SSL, 
     OPENSEARCH_VERIFY_CERTS,
+    OPENSEARCH_PASSWORD,
     EMBEDDING_MODEL_NAME
 )
 from uuid import uuid4
@@ -28,6 +29,13 @@ class EmbeddingService:
     """Инкапсулирует клиент Gemini и логику векторизации."""
     
     def __init__(self, model_name: str):
+        # Настраиваем прокси через переменные среды для текущего процесса
+        import os
+        # Весь HTTPS трафик (Gemini) - через VPN
+        os.environ['HTTPS_PROXY'] = 'http://wireguard:8888'
+        # Локальные сервисы - напрямую (Исключаем из прокси)
+        os.environ['NO_PROXY'] = 'localhost,127.0.0.1,opensearch,redis,postgres_db,legal_rag_postgres,legal_rag_redis'
+
         self.__client = genai.Client(api_key=GEMINI_API_KEY)
         self.__model_name = model_name
         self.vector_dimension = EMBEDDING_DIMENSION
@@ -86,9 +94,11 @@ class OpenSearchClientWrapper:
     """Инкапсулирует клиент OpenSearch и логику взаимодействия с индексом."""
     
     def __init__(self, host: str, port: int, index_name: str, use_ssl: bool, verify_certs: bool):
+        http_auth = ("admin", OPENSEARCH_PASSWORD) if OPENSEARCH_PASSWORD else None
+        
         self.__client = OpenSearch(
             hosts=[{'host': host, 'port': port}],
-            http_auth=None,
+            http_auth=http_auth,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
             ssl_show_warn=False,

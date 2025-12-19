@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Pre-download NLTK data to avoid runtime network issues
+RUN python -m nltk.downloader punkt stopwords -d /usr/share/nltk_data
+
 # Копирование файлов проекта
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
@@ -47,4 +50,4 @@ COPY delete_document.py .
 COPY clear_databases.py .
 
 # Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7150", "--workers", "4"]

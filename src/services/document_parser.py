@@ -29,11 +29,11 @@ logger = get_logger(__name__)
 os.environ['OMP_THREAD_LIMIT'] = '1'
 
 # Настройки адаптивного OCR
-ADAPTIVE_OCR_DPI = 300
+ADAPTIVE_OCR_DPI = 350
 ADAPTIVE_SIZE_THRESHOLDS = {
-    'A2': {'max_size': 4500, 'max_dimension': 2500, 'dpi': ADAPTIVE_OCR_DPI},  # Большие страницы
-    'A3': {'max_size': 3500, 'max_dimension': 2000, 'dpi': ADAPTIVE_OCR_DPI * 1.4},  # Средние страницы
-    'A4': {'max_size': 2500, 'max_dimension': 1500, 'dpi': ADAPTIVE_OCR_DPI * 1.6},  # Стандартные страницы
+    'A2': {'max_size': 4500, 'max_dimension': 2500},  # Большие страницы
+    'A3': {'max_size': 3500, 'max_dimension': 2000},  # Средние страницы
+    'A4': {'max_size': 2500, 'max_dimension': 1500},  # Стандартные страницы
 }
 
 class DocumentParser:
