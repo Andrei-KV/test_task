@@ -3,6 +3,10 @@ from typing import List, Dict, Any
 from src.services.document_parser import document_parser
 from src.services.chunking_service import chunking_service
 from src.app.logging_config import get_logger
+from ..config import (
+    CHUNKING_SIZE,
+    CHUNKING_OVERLAP,
+)
 
 logger = get_logger(__name__)
 
@@ -41,8 +45,8 @@ class DocumentProcessorService:
             parsed_pages=parsed_pages,
             document_id=document_id,
             document_title=document_title,
-            chunk_size=1000, # Configurable
-            overlap=150
+            chunk_size=CHUNKING_SIZE,
+            overlap=CHUNKING_OVERLAP
         )
 
         logger.info(f"Created {len(chunks_data)} chunks for {file_name}")

@@ -22,7 +22,7 @@ rag-test-task-*.json
 # document_deleter.py  
 # clear_databases.py
 # main.py
-
+google_drive_listener.py
 # Test files
 test_*.py
 *_test.py
@@ -32,42 +32,8 @@ delete_document.py
 docker-compose-dev.yml
 docker-compose.override.yml
 
-# Test output files
-test_output.txt
-test_output_*.txt
-test_chunks_*.txt
-pages_test.txt
-chunks_test*.txt
-chunks_verification*.txt
-ocr_debug_results.txt
-
-# Temporary scripts
-google_drive_listener.py
-update_database.py
-verify_*.py
-index_to_opensearch.py
-view_chunks.py
-
-# Documentation (temporary/local)
-implementation_plan.md
-APP_ANALYSIS.md
-CPU_OPTIMIZATION.md
-DEPENDENCY_ANALYSIS.md
-GARBAGE_DETECTION_TEST_RESULTS.md
-HOW_IT_WORKS.md
-INGESTION_ANALYSIS.md
-LOGGING_GUIDE.md
-OCR_README.md
-OPENSEARCH_SETUP.md
-
-# Test PDFs
-*.pdf
-!docs/**/*.pdf
-
-# OCR testing directory (local experiments)
-ocr_tests/
-ocr_results/
-results/
+# Ignore embedding_tests directory
+embedding_tests/
 
 # Images
 *.png
@@ -81,3 +47,7 @@ draft.txt
 data.txt
 data2.txt
 image.png
+
+# wireguard
+
+wireguard/
