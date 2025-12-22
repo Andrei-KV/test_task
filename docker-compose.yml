@@ -111,6 +111,8 @@ services:
       - .env
     environment:
       - OPENSEARCH_USE_SSL=true # Принудительно включаем SSL для соединения с БД
+      - EMBEDDING_PROVIDER
+      - OPENAI_API_KEY
     networks:
       - in_net
 

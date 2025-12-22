@@ -23,8 +23,15 @@ OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD")
 
 
 # Embedding model configuration
-EMBEDDING_MODEL_NAME = "models/gemini-embedding-001"
-EMBEDDING_DIMENSION = 3072
+EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'google').lower() # 'google' or 'openai'
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+if EMBEDDING_PROVIDER == 'openai':
+    EMBEDDING_MODEL_NAME = "text-embedding-3-small"
+    EMBEDDING_DIMENSION = 1536
+else:
+    EMBEDDING_MODEL_NAME = "models/gemini-embedding-001"
+    EMBEDDING_DIMENSION = 3072
 # RERANKER_MODEL_NAME = os.getenv('RERANKER_MODEL_NAME')
 
 # LLM configuration

@@ -4,118 +4,48 @@ Indexes documents with embeddings into OpenSearch using bulk API.
 """
 import asyncio
 import logging
-from google import genai
 from opensearchpy import AsyncOpenSearch, helpers
 from src.config import (
-    GEMINI_API_KEY,
-    EMBEDDING_MODEL_NAME,
-    OPENSEARCH_HOST,
-    OPENSEARCH_PORT,
-    OPENSEARCH_INDEX,
-    OPENSEARCH_USE_SSL,
-    OPENSEARCH_VERIFY_CERTS
+    OPENSEARCH_INDEX
 )
-from src.services.opensearch_client import opensearch_client
+from src.services.vectorization import indexing_pipe_line
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class PayloadObject:
+    """Helper class to convert dict to object for IndexingPipeline compatibility"""
+    def __init__(self, data):
+        self.content = data.get('content')
+        self.document_id = data.get('document_id')
+        self.document_title = data.get('document_title', 'Test Document') # Default title for test
+        self.chunk_id = data.get('chunk_id')
+        self.chunk_index = data.get('chunk_id') # Reuse chunk_id as index for test
+        self.page_number = data.get('page_number')
+        self.content_type = data.get('type')
+        self.sheet_name = data.get('sheet_name')
+        self.qdrant_id = data.get('qdrant_id')
+
 async def index_documents_to_opensearch(chunks_data: list[dict]):
     """
-    Index document chunks into OpenSearch with embeddings.
+    Index document chunks into OpenSearch using the shared IndexingPipeline.
     
     Args:
-        chunks_data: List of chunk dictionaries with fields:
-            - content: text content
-            - document_id: document ID
-            - chunk_id: chunk ID
-            - page_number: page number
-            - type: chunk type
-            - sheet_name: (optional) sheet name for Excel
-            - qdrant_id: unique ID
+        chunks_data: List of chunk dictionaries.
     """
     logger.info(f"Starting indexing of {len(chunks_data)} chunks to OpenSearch...")
     
-    # Initialize Gemini client for embeddings
-    gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    
-    # Initialize OpenSearch client
-    os_client = AsyncOpenSearch(
-        hosts=[{'host': OPENSEARCH_HOST, 'port': OPENSEARCH_PORT}],
-        http_auth=None,
-        use_ssl=OPENSEARCH_USE_SSL,
-        verify_certs=OPENSEARCH_VERIFY_CERTS,
-        ssl_show_warn=False
-    )
+    # Convert dicts to objects expected by IndexingPipeline
+    chunk_objects = [PayloadObject(chunk) for chunk in chunks_data]
     
     try:
-        # Ensure index exists
-        await opensearch_client.create_index()
-        
-        # Prepare bulk actions
-        actions = []
-        
-        for i, chunk in enumerate(chunks_data):
-            try:
-                # Generate embedding with Gemini
-                result = gemini_client.models.embed_content(
-                    model=EMBEDDING_MODEL_NAME,
-                    contents=chunk['content'],
-                    config=genai.types.EmbedContentConfig(
-                        task_type="RETRIEVAL_DOCUMENT",
-                        output_dimensionality=3072
-                    )
-                )
-                embedding = result.embeddings[0].values
-                
-                # Prepare document for indexing
-                doc = {
-                    '_index': OPENSEARCH_INDEX,
-                    '_id': chunk['qdrant_id'],
-                    '_source': {
-                        'embedding': embedding,
-                        'content': chunk['content'],
-                        'document_id': chunk['document_id'],
-                        'chunk_id': chunk['chunk_id'],
-                        'page_number': chunk.get('page_number'),
-                        'type': chunk.get('type'),
-                        'sheet_name': chunk.get('sheet_name'),
-                        'qdrant_id': chunk['qdrant_id']
-                    }
-                }
-                actions.append(doc)
-                
-                if (i + 1) % 10 == 0:
-                    logger.info(f"Prepared {i + 1}/{len(chunks_data)} documents for indexing")
-                    
-            except Exception as e:
-                logger.error(f"Error preparing chunk {i}: {e}")
-                continue
-        
-        # Bulk index
-        if actions:
-            logger.info(f"Bulk indexing {len(actions)} documents...")
-            success, failed = await helpers.async_bulk(
-                os_client,
-                actions,
-                chunk_size=100,
-                raise_on_error=False
-            )
-            logger.info(f"✅ Indexed {success} documents successfully")
-            if failed:
-                logger.warning(f"⚠️ Failed to index {len(failed)} documents")
-        
-        # Refresh index to make documents searchable
-        await os_client.indices.refresh(index=OPENSEARCH_INDEX)
-        logger.info("✅ Index refreshed, documents are now searchable")
+        # Run pipeline (it is synchronous in current implementation)
+        indexing_pipe_line.run(chunk_objects)
         
     except Exception as e:
         logger.error(f"Error during indexing: {e}")
         raise
-    finally:
-        await os_client.close()
-        logger.info("OpenSearch client closed")
 
 
 async def test_indexing():

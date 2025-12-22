@@ -9,9 +9,6 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-download NLTK data to avoid runtime network issues
-RUN python -m nltk.downloader punkt stopwords -d /usr/share/nltk_data
-
 # Копирование файлов проекта
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
@@ -19,6 +16,9 @@ COPY pyproject.toml poetry.lock ./
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction
+
+# Pre-download NLTK data to avoid runtime network issues
+RUN python -m nltk.downloader punkt stopwords -d /usr/share/nltk_data
 
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
@@ -33,8 +33,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка переменных окружения
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Копирование установленных зависимостей из этапа сборки
 WORKDIR /app

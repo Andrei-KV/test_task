@@ -7,7 +7,12 @@ from src.config import (
     OPENSEARCH_USE_SSL, 
     OPENSEARCH_VERIFY_CERTS,
     OPENSEARCH_PASSWORD,
-    EMBEDDING_MODEL_NAME
+    OPENSEARCH_PASSWORD,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_PROVIDER,
+    OPENAI_API_KEY,
+    GEMINI_API_KEY,
+    EMBEDDING_DIMENSION
 )
 from uuid import uuid4
 from src.app.logging_config import get_logger
@@ -18,17 +23,21 @@ logger = get_logger(__name__)
 if (OPENSEARCH_HOST is None) or (OPENSEARCH_INDEX is None) or (EMBEDDING_MODEL_NAME is None):
     raise ValueError("Переменные не найдены. Проверьте файл .env.")
 
+import openai
 from google import genai
-from src.config import GEMINI_API_KEY, EMBEDDING_DIMENSION
-
 import time
 import random
 from google.genai.errors import ClientError
 
+
 class EmbeddingService:
-    """Инкапсулирует клиент Gemini и логику векторизации."""
+    """Инкапсулирует клиент для векторизации (Gemini или OpenAI) и логику векторизации."""
     
     def __init__(self, model_name: str):
+        self.__model_name = model_name
+        self.vector_dimension = EMBEDDING_DIMENSION
+        self.provider = EMBEDDING_PROVIDER
+
         # Настраиваем прокси через переменные среды для текущего процесса
         import os
         # Весь HTTPS трафик (Gemini) - через VPN
@@ -36,56 +45,79 @@ class EmbeddingService:
         # Локальные сервисы - напрямую (Исключаем из прокси)
         os.environ['NO_PROXY'] = 'localhost,127.0.0.1,opensearch,redis,postgres_db,legal_rag_postgres,legal_rag_redis'
 
-        self.__client = genai.Client(api_key=GEMINI_API_KEY)
-        self.__model_name = model_name
-        self.vector_dimension = EMBEDDING_DIMENSION
+        if self.provider == 'openai':
+            if not OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY is required for OpenAI embedding provider.")
+            self.__client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            logger.info("Initialized OpenAI Embedding Client")
+        else:
+            self.__client = genai.Client(api_key=GEMINI_API_KEY)
+            logger.info("Initialized Google Gemini Embedding Client")
 
     def vectorize_chunks(self, chunks: list[str]) -> list[list[float]]:
-        """Векторизует список текстовых фрагментов, используя Gemini API с повторными попытками."""
-        logger.info("Vectorizing user file with Gemini...")
+        """Векторизует список текстовых фрагментов, используя выбранный провайдер с повторными попытками."""
+        logger.info(f"Vectorizing {len(chunks)} chunks with {self.provider}...")
         embeddings = []
         
-        for chunk in chunks:
-            max_retries = 5
-            base_delay = 5
-            
-            for attempt in range(max_retries):
-                try:
-                    result = self.__client.models.embed_content(
-                        model=self.__model_name,
-                        contents=chunk,
-                        config=genai.types.EmbedContentConfig(
-                            task_type="RETRIEVAL_DOCUMENT",
-                            output_dimensionality=self.vector_dimension
+        if self.provider == 'openai':
+            try:
+                # OpenAI supports batching, but let's stick to the interface or use batch if possible.
+                # OpenAI text-embedding-3-small allows arrays of strings.
+                # However, for error handling consistency, we might want to do it carefully or just trust the lib.
+                # Using simple list generic call for now.
+                response = self.__client.embeddings.create(
+                    input=chunks,
+                    model=self.__model_name
+                )
+                # Ensure order is preserved
+                embeddings = [data.embedding for data in response.data]
+            except Exception as e:
+                 logger.error(f"❌ OpenAI Embedding Error: {e}")
+                 raise e
+                 
+        else:
+            # Google / Gemini implementation
+            for chunk in chunks:
+                max_retries = 5
+                base_delay = 5
+                
+                for attempt in range(max_retries):
+                    try:
+                        result = self.__client.models.embed_content(
+                            model=self.__model_name,
+                            contents=chunk,
+                            config=genai.types.EmbedContentConfig(
+                                task_type="RETRIEVAL_DOCUMENT",
+                                output_dimensionality=self.vector_dimension
+                            )
                         )
-                    )
-                    embeddings.append(result.embeddings[0].values)
-                    break # Success, exit retry loop
-                    
-                except ClientError as e:
-                    if e.code == 429:
-                        if attempt < max_retries - 1:
-                            delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
-                            logger.warning(f"⚠️ Quota exceeded (429). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
-                            time.sleep(delay)
-                            continue
+                        embeddings.append(result.embeddings[0].values)
+                        break # Success, exit retry loop
+                        
+                    except ClientError as e:
+                        if e.code == 429:
+                            if attempt < max_retries - 1:
+                                delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                                logger.warning(f"⚠️ Quota exceeded (429). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                                time.sleep(delay)
+                                continue
+                            else:
+                                logger.error(f"❌ Max retries exceeded for 429 error: {e}")
+                                raise e
                         else:
-                            logger.error(f"❌ Max retries exceeded for 429 error: {e}")
+                            logger.error(f"❌ Gemini ClientError: {e}")
                             raise e
-                    else:
-                        logger.error(f"❌ Gemini ClientError: {e}")
+                    except Exception as e:
+                        # Check if it's a 429 wrapped in another exception
+                        if "429" in str(e):
+                             if attempt < max_retries - 1:
+                                delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                                logger.warning(f"⚠️ Quota exceeded (429/Exception). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                                time.sleep(delay)
+                                continue
+                        
+                        logger.error(f"❌ Error embedding chunk: {e}")
                         raise e
-                except Exception as e:
-                    # Check if it's a 429 wrapped in another exception
-                    if "429" in str(e):
-                         if attempt < max_retries - 1:
-                            delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
-                            logger.warning(f"⚠️ Quota exceeded (429/Exception). Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
-                            time.sleep(delay)
-                            continue
-                    
-                    logger.error(f"❌ Error embedding chunk: {e}")
-                    raise e
                 
         logger.info("Text vectorized successfully.")
         return embeddings
