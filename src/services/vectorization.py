@@ -7,7 +7,6 @@ from src.config import (
     OPENSEARCH_USE_SSL, 
     OPENSEARCH_VERIFY_CERTS,
     OPENSEARCH_PASSWORD,
-    OPENSEARCH_PASSWORD,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_PROVIDER,
     OPENAI_API_KEY,
@@ -37,13 +36,6 @@ class EmbeddingService:
         self.__model_name = model_name
         self.vector_dimension = EMBEDDING_DIMENSION
         self.provider = EMBEDDING_PROVIDER
-
-        # Настраиваем прокси через переменные среды для текущего процесса
-        import os
-        # Весь HTTPS трафик (Gemini) - через VPN
-        os.environ['HTTPS_PROXY'] = 'http://wireguard:8888'
-        # Локальные сервисы - напрямую (Исключаем из прокси)
-        os.environ['NO_PROXY'] = 'localhost,127.0.0.1,opensearch,redis,postgres_db,legal_rag_postgres,legal_rag_redis'
 
         if self.provider == 'openai':
             if not OPENAI_API_KEY:

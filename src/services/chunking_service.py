@@ -5,11 +5,18 @@ import tiktoken
 import nltk
 from uuid import uuid4
 
-# Ensure nltk data is available (can be moved to a setup script)
+# Ensure nltk data is available (pre-downloaded in Docker)
+NLTK_DATA_PATH = '/usr/local/share/nltk_data'
+if NLTK_DATA_PATH not in nltk.data.path:
+    nltk.data.path.insert(0, NLTK_DATA_PATH)
+
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
-    nltk.download('punkt')
+    # In Docker this should already be present. 
+    # If not, we log and raise to avoid hanging on nltk.download()
+    logger.error(f"NLTK punkt tokenizer not found at {NLTK_DATA_PATH}")
+    raise RuntimeError(f"NLTK punkt not found in {NLTK_DATA_PATH}. Ensure it is downloaded in Dockerfile.")
 
 from src.app.logging_config import get_logger
 from ..config import (

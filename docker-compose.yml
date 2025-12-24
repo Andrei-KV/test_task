@@ -40,7 +40,7 @@ services:
     networks:
       - in_net
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -96,6 +96,12 @@ services:
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
     networks:
       - in_net
+    # Проверяем что proxy доступен
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:9999/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
 
   # ----------------------------------------------------------------
@@ -110,12 +116,9 @@ services:
     env_file:
       - .env
     environment:
-      - OPENSEARCH_USE_SSL=true # Принудительно включаем SSL для соединения с БД
-      - EMBEDDING_PROVIDER
-      - OPENAI_API_KEY
+      - OPENSEARCH_USE_SSL=true
     networks:
       - in_net
-
     depends_on:
       wireguard:
         condition: service_started
