@@ -119,14 +119,16 @@ class OpenSearchClientWrapper:
     
     def __init__(self, host: str, port: int, index_name: str, use_ssl: bool, verify_certs: bool):
         http_auth = ("admin", OPENSEARCH_PASSWORD) if OPENSEARCH_PASSWORD else None
-        
+        logger.info(f"Connecting to OpenSearch at {host}:{port}...")
         self.__client = OpenSearch(
             hosts=[{'host': host, 'port': port}],
             http_auth=http_auth,
             use_ssl=use_ssl,
             verify_certs=verify_certs,
             ssl_show_warn=False,
-            timeout=60  # Увеличен таймаут до 60 секунд для медленных операций
+            timeout=30,
+            max_retries=3,
+            retry_on_timeout=True,
         )
         self.__index_name = index_name
 
