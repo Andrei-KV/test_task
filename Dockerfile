@@ -9,9 +9,6 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-download NLTK data to avoid runtime network issues
-RUN python -m nltk.downloader punkt stopwords -d /usr/share/nltk_data
-
 # Копирование файлов проекта
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
@@ -19,6 +16,13 @@ COPY pyproject.toml poetry.lock ./
 # Установка зависимостей с помощью Poetry
 RUN poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction
+
+# Pre-download NLTK data to avoid runtime network issues
+RUN python -m nltk.downloader punkt punkt_tab stopwords -d /usr/share/nltk_data
+
+# Pre-download tiktoken encoding
+ENV TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
+RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 # Этап 2: Создание конечного образа
 FROM python:3.12-slim
@@ -33,13 +37,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Установка переменных окружения
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Копирование установленных зависимостей из этапа сборки
 WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /usr/share/nltk_data /usr/share/nltk_data
+COPY --from=builder /app/tiktoken_cache /app/tiktoken_cache
 
 # Копирование исходного кода приложения
 COPY src ./src

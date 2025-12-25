@@ -13,7 +13,7 @@ from openai import AsyncOpenAI
 from xml.sax.saxutils import escape
 from ..database.database import AsyncSessionLocal
 from ..database.models import Document, DocumentChunk
-from ..config import LLM_MODEL, DEEPSEEK_API_KEY, EMBEDDING_MODEL_NAME
+from ..config import LLM_MODEL, DEEPSEEK_API_KEY, EMBEDDING_MODEL_NAME, EMBEDDING_PROVIDER, OPENAI_API_KEY, EMBEDDING_DIMENSION
 from src.app.logging_config import get_logger
 from google import genai
 from google.genai.types import GenerateContentConfig
@@ -47,30 +47,53 @@ from .retry_utils import retry_with_backoff
 
 # =====================================================================
 # Сервис векторизации запроса
+# Сервис векторизации запроса
 class QueryEmbeddingService:
     def __init__(self, api_key: str, model_name: str):
-        self.__client = genai.Client(api_key=api_key)
         self.__model_name = model_name
+        self.__provider = EMBEDDING_PROVIDER
+        
+        if self.__provider == 'openai':
+            from openai import AsyncOpenAI
+            self.__client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        else:
+            self.__client = genai.Client(api_key=api_key)
 
     @retry_with_backoff
     async def vectorize_query(self, query: str) -> list[float]:
         """Векторизует один текстовый запрос для поиска."""
-        logger.info("Vectorizing user query with Gemini...")
-        try:
-            result = await self.__client.aio.models.embed_content(
-                model=self.__model_name,
-                contents=query,
-                config=genai.types.EmbedContentConfig(
-                    task_type="RETRIEVAL_QUERY",
-                    output_dimensionality=3072
+        
+        if self.__provider == 'openai':
+            logger.info(f"Vectorizing user query with OpenAI ({self.__model_name})...")
+            try:
+                # OpenAI Embedding API
+                response = await self.__client.embeddings.create(
+                    input=query,
+                    model=self.__model_name
                 )
-            )
-            logger.info("User query vectorized successfully.")
-            # result.embeddings is a list, we take the first one
-            return result.embeddings[0].values
-        except Exception as e:
-            logger.error(f"Error vectorizing query: {e}")
-            raise
+                logger.info("User query vectorized successfully (OpenAI).")
+                return response.data[0].embedding
+            except Exception as e:
+                logger.error(f"Error vectorizing query with OpenAI: {e}")
+                raise
+        else:
+            # Google Gemini Embedding API
+            logger.info(f"Vectorizing user query with Gemini ({self.__model_name})...")
+            try:
+                result = await self.__client.aio.models.embed_content(
+                    model=self.__model_name,
+                    contents=query,
+                    config=genai.types.EmbedContentConfig(
+                        task_type="RETRIEVAL_QUERY",
+                        output_dimensionality=EMBEDDING_DIMENSION
+                    )
+                )
+                logger.info("User query vectorized successfully (Gemini).")
+                # result.embeddings is a list, we take the first one
+                return result.embeddings[0].values
+            except Exception as e:
+                logger.error(f"Error vectorizing query with Gemini: {e}")
+                raise
 
 
 # Extract full context from PostgreSQL

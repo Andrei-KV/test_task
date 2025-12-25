@@ -11,8 +11,10 @@ from src.config import (
     OPENSEARCH_HOST,
     OPENSEARCH_PORT,
     OPENSEARCH_INDEX,
+    OPENSEARCH_INDEX,
     OPENSEARCH_USE_SSL,
-    OPENSEARCH_VERIFY_CERTS
+    OPENSEARCH_VERIFY_CERTS,
+    OPENSEARCH_PASSWORD
 )
 
 # Настройка логирования
@@ -70,9 +72,12 @@ async def clear_opensearch_index():
     Удаляет индекс из OpenSearch.
     """
     logger.info(f"Начинаем очистку OpenSearch ({LOCAL_OPENSEARCH_HOST}:{OPENSEARCH_PORT})...")
+    
+    http_auth = ("admin", OPENSEARCH_PASSWORD) if OPENSEARCH_PASSWORD else None
+    
     client = AsyncOpenSearch(
         hosts=[{'host': LOCAL_OPENSEARCH_HOST, 'port': OPENSEARCH_PORT}],
-        http_auth=None,
+        http_auth=http_auth,
         use_ssl=OPENSEARCH_USE_SSL,
         verify_certs=OPENSEARCH_VERIFY_CERTS,
         ssl_show_warn=False

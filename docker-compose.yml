@@ -40,7 +40,7 @@ services:
     networks:
       - in_net
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -52,11 +52,12 @@ services:
     image: opensearchproject/opensearch:2.11.0
     container_name: opensearch
     restart: always
+    env_file:
+      - .env
     environment:
       - discovery.type=single-node
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
       - DISABLE_SECURITY_PLUGIN=false
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD}
     # ports: # Prod: Closed
     #   - "9201:9200"
     #   - "9601:9600"
@@ -65,7 +66,7 @@ services:
     networks:
       - in_net
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f -k -u admin:$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f -k -u admin:$$OPENSEARCH_PASSWORD https://localhost:9200/_cluster/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -96,6 +97,12 @@ services:
       - FIREWALL_OUTBOUND_SUBNETS=172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
     networks:
       - in_net
+    # Проверяем что proxy доступен
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:9999/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always
 
   # ----------------------------------------------------------------
@@ -110,10 +117,9 @@ services:
     env_file:
       - .env
     environment:
-      - OPENSEARCH_USE_SSL=true # Принудительно включаем SSL для соединения с БД
+      - OPENSEARCH_USE_SSL=true
     networks:
       - in_net
-
     depends_on:
       wireguard:
         condition: service_started
@@ -122,7 +128,7 @@ services:
       redis:
         condition: service_healthy
       opensearch:
-        condition: service_healthy
+        condition: service_started
 
     command: uvicorn main:app --host 0.0.0.0 --port 7150 --workers 4
 
